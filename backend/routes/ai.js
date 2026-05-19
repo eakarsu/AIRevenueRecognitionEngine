@@ -1,452 +1,151 @@
-const express = require('express');
-const router = express.Router();
-const axios = require('axios');
-
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-
-async function callOpenRouter(systemPrompt, userPrompt) {
-  const response = await axios.post(OPENROUTER_URL, {
-    model: process.env.OPENROUTER_MODEL,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt }
-    ],
-    temperature: 0.3
-  }, {
-    headers: {
-      'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-      'Content-Type': 'application/json'
-    }
-  });
-
-  const content = response.data.choices[0].message.content;
-
-  // Try to parse JSON from response
-  let parsed = content;
-  try {
-    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
-    }
-  } catch (e) {
-    // Keep as string if not valid JSON
-  }
-
-  return { analysis: parsed, raw_response: content };
+const express=require('express');const router=express.Router();const axios=require('axios');const pool=require('../db');
+const{authenticate}=require('../middleware/auth');const{aiRateLimiter}=require('../middleware/rateLimiter');
+const{body,validationResult}=require('express-validator');
+// CRITICAL: auth on ALL AI routes
+router.use(authenticate);router.use(aiRateLimiter);
+const OPENROUTER_URL='https://openrouter.ai/api/v1/chat/completions';
+const MODEL='anthropic/claude-3-5-sonnet-20241022';
+// 3-strategy JSON parser
+function parseAIJson(content){
+try{return JSON.parse(content);}catch{}
+const md=content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);if(md){try{return JSON.parse(md[1]);}catch{}}
+const obj=content.match(/(\{[\s\S]*\})/s);if(obj){try{return JSON.parse(obj[1]);}catch{}}
+return{raw:content};
 }
-
-// POST /api/ai/compliance-check
-router.post('/compliance-check', async (req, res) => {
-  try {
-    const { contract } = req.body;
-
-    const systemPrompt = `You are an expert revenue recognition accountant specializing in ASC 606 (Revenue from Contracts with Customers).
-ASC 606 follows a five-step model:
-1. Identify the contract with a customer
-2. Identify the performance obligations in the contract
-3. Determine the transaction price
-4. Allocate the transaction price to the performance obligations
-5. Recognize revenue when (or as) the entity satisfies a performance obligation
-
-Analyze contracts for compliance with each step and identify any issues, risks, or recommendations.
-Respond in JSON format with keys: overall_compliance (percentage), steps (array of {step, status, findings, recommendations}), risks (array), and summary.`;
-
-    const userPrompt = `Analyze the following contract for ASC 606 compliance:\n${JSON.stringify(contract, null, 2)}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Compliance check error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to perform compliance check', details: err.message });
-  }
+async function callAI(systemPrompt,userPrompt){
+if(!process.env.OPENROUTER_API_KEY){const err=new Error('OPENROUTER_API_KEY not configured');err.code='NO_API_KEY';throw err;}
+const start=Date.now();
+const response=await axios.post(OPENROUTER_URL,{model:MODEL,messages:[{role:'system',content:systemPrompt},{role:'user',content:userPrompt}],temperature:0.3},{headers:{'Authorization':`Bearer ${process.env.OPENROUTER_API_KEY}`,'Content-Type':'application/json'}});
+const content=response.data.choices[0].message.content;
+return{parsed:parseAIJson(content),raw:content,duration:Date.now()-start};
+}
+async function persistRun(userId,endpoint,inputData,result,duration){
+try{await pool.query('INSERT INTO ai_runs (user_id,endpoint,input_data,result,model_used,duration_ms) VALUES ($1,$2,$3,$4,$5,$6)',[userId,endpoint,JSON.stringify(inputData),JSON.stringify(result),MODEL,duration]);}catch{}
+}
+async function handle(req,res,endpoint,systemPrompt,userPrompt,inputData){
+try{
+const{parsed,raw,duration}=await callAI(systemPrompt,userPrompt);
+await persistRun(req.user.id,endpoint,inputData,parsed,duration);
+res.json({success:true,analysis:parsed,raw_response:raw});
+}catch(err){if(err.code==='NO_API_KEY')return res.status(503).json({success:false,error:'AI service unavailable: OPENROUTER_API_KEY not configured on server'});console.error(endpoint,err.response?.data||err.message);res.status(500).json({success:false,error:'AI request failed',details:err.message});}
+}
+// compliance-check
+router.post('/compliance-check',async(req,res)=>{const{contract}=req.body;await handle(req,res,'/compliance-check',`You are an ASC 606 expert. Analyze contracts for compliance. Return JSON with: overall_compliance (%), steps (array: {step,status,findings,recommendations}), risks (array), summary.`,`Analyze for ASC 606 compliance:\n${JSON.stringify(contract)}`,{contract});});
+// transaction-price-allocation
+router.post('/transaction-price-allocation',async(req,res)=>{const{contract,performance_obligations,total_price}=req.body;await handle(req,res,'/transaction-price-allocation',`You are an ASC 606 Step 4 expert. Return JSON with: allocation_method, allocations (array: {obligation,standalone_selling_price,allocated_amount,percentage}), total_allocated, notes.`,`Contract: ${JSON.stringify(contract)}\nObligations: ${JSON.stringify(performance_obligations)}\nTotal Price: $${total_price}`,{total_price});});
+// variable-consideration
+router.post('/variable-consideration',async(req,res)=>{const{contract_terms,variable_elements}=req.body;await handle(req,res,'/variable-consideration',`You are an ASC 606 variable consideration expert. Return JSON with: variable_elements_analysis (array), estimation_method, estimated_amount, constraint_assessment, recommended_transaction_price, reasoning.`,`Contract: ${JSON.stringify(contract_terms)}\nVariable: ${JSON.stringify(variable_elements)}`,{contract_terms});});
+// contract-modification
+router.post('/contract-modification',async(req,res)=>{const{original_contract,modification}=req.body;await handle(req,res,'/contract-modification',`You are an ASC 606 contract modification expert. Return JSON with: modification_type, treatment, reasoning, impact_on_revenue, accounting_entries_needed, recommendations.`,`Original: ${JSON.stringify(original_contract)}\nModification: ${JSON.stringify(modification)}`,{});});
+// risk-assessment
+router.post('/risk-assessment',async(req,res)=>{const{contract}=req.body;await handle(req,res,'/risk-assessment',`You are a revenue recognition risk expert. Return JSON with: overall_risk_score (1-100), risk_level, risk_categories (array: {category,score,description,mitigation}), key_concerns, recommendations.`,`Assess risks:\n${JSON.stringify(contract)}`,{});});
+// revenue-forecast
+router.post('/revenue-forecast',async(req,res)=>{const{historical_data,forecast_periods}=req.body;await handle(req,res,'/revenue-forecast',`You are a revenue forecasting expert. Return JSON with: forecast (array: {period,predicted_amount,lower_bound,upper_bound,confidence_level}), methodology, assumptions, growth_rate, key_drivers.`,`Historical: ${JSON.stringify(historical_data)}\nPeriods: ${forecast_periods||6}`,{});});
+// journal-entry-suggestion
+router.post('/journal-entry-suggestion',async(req,res)=>{const{revenue_event}=req.body;await handle(req,res,'/journal-entry-suggestion',`You are an ASC 606 journal entry expert. Return JSON with: journal_entries (array: {date,description,debit_account,credit_account,amount,rationale}), explanation, asc_606_step, balance_check (debits===credits).`,`Revenue event:\n${JSON.stringify(revenue_event)}`,{});});
+// multi-element-arrangement
+router.post('/multi-element-arrangement',async(req,res)=>{const{arrangement}=req.body;await handle(req,res,'/multi-element-arrangement',`You are an ASC 606 multi-element expert. Return JSON with: identified_obligations (array: {description,is_distinct,distinct_reasoning,satisfaction_method,estimated_ssp}), bundling_recommendations, allocation_approach, total_arrangement_value.`,`Arrangement:\n${JSON.stringify(arrangement)}`,{});});
+// customer-credit-analysis
+router.post('/customer-credit-analysis',async(req,res)=>{const{customer}=req.body;await handle(req,res,'/customer-credit-analysis',`You are a credit analyst for ASC 606. Return JSON with: credit_score, credit_grade (A/B/C/D/F), collectibility_assessment, payment_probability, recommended_terms, revenue_impact, recommendations.`,`Customer:\n${JSON.stringify(customer)}`,{});});
+// invoice-anomaly-detection
+router.post('/invoice-anomaly-detection',async(req,res)=>{const{invoices}=req.body;await handle(req,res,'/invoice-anomaly-detection',`You are an invoice fraud detection expert. Return JSON with: anomalies (array: {invoice_id,type,severity,description,recommendation}), risk_summary, total_at_risk_amount, patterns_detected.`,`Invoices:\n${JSON.stringify(invoices)}`,{count:invoices?.length});});
+// revenue-leakage-detection
+router.post('/revenue-leakage-detection',async(req,res)=>{const{contracts,invoices,revenue_schedules}=req.body;await handle(req,res,'/revenue-leakage-detection',`You are a revenue leakage analyst. Return JSON with: leakage_items (array: {source,description,estimated_amount,priority}), total_leakage_estimate, root_causes, recommendations.`,`Contracts: ${JSON.stringify(contracts)}\nInvoices: ${JSON.stringify(invoices)}\nSchedules: ${JSON.stringify(revenue_schedules)}`,{});});
+// contract-clause-analyzer
+router.post('/contract-clause-analyzer',async(req,res)=>{const{contract_text,clauses}=req.body;await handle(req,res,'/contract-clause-analyzer',`You are a contract clause analyzer. Return JSON with: clauses_analysis (array: {clause,type,revenue_impact,asc_606_implication,risk_level,recommendation}), key_findings, overall_complexity.`,`Text: ${contract_text||'N/A'}\nClauses: ${JSON.stringify(clauses)}`,{});});
+// audit-readiness
+router.post('/audit-readiness',async(req,res)=>{const{company_data}=req.body;await handle(req,res,'/audit-readiness',`You are an ASC 606 auditor. Return JSON with: readiness_score (1-100), readiness_level, categories (array: {area,score,status,gaps,action_items}), priority_actions, estimated_preparation_time.`,`Company data:\n${JSON.stringify(company_data)}`,{});});
+// disclosure-generator
+router.post('/disclosure-generator',async(req,res)=>{const{revenue_data,contracts_summary,accounting_policies}=req.body;await handle(req,res,'/disclosure-generator',`You are an ASC 606 disclosure expert. Return JSON with: disclosures (array: {section,title,content}), footnotes, required_tables, management_discussion_points.`,`Revenue: ${JSON.stringify(revenue_data)}\nContracts: ${JSON.stringify(contracts_summary)}\nPolicies: ${JSON.stringify(accounting_policies)}`,{});});
+// ssp-estimator
+router.post('/ssp-estimator',async(req,res)=>{const{product_or_service,market_data,cost_data,historical_prices}=req.body;await handle(req,res,'/ssp-estimator',`You are an SSP estimation expert. Return JSON with: recommended_ssp, estimation_method, analysis (array: {method,estimated_price,confidence,rationale}), supporting_evidence, documentation_notes.`,`Product: ${JSON.stringify(product_or_service)}\nMarket: ${JSON.stringify(market_data)}\nCost: ${JSON.stringify(cost_data)}\nHistory: ${JSON.stringify(historical_prices)}`,{});});
+// revenue-waterfall
+router.post('/revenue-waterfall',async(req,res)=>{const{periods,opening_balances,new_bookings,recognitions,adjustments}=req.body;await handle(req,res,'/revenue-waterfall',`You are a revenue waterfall analyst. Return JSON with: waterfall_analysis (array: {period,opening,additions,recognized,closing,recognition_rate}), trends, seasonality_factors, forecast_next_periods, insights.`,`Periods: ${JSON.stringify(periods)}\nOpenings: ${JSON.stringify(opening_balances)}\nBookings: ${JSON.stringify(new_bookings)}`,{});});
+// obligation-identifier
+router.post('/obligation-identifier',async(req,res)=>{const{contract_description}=req.body;await handle(req,res,'/obligation-identifier',`You are an ASC 606 Step 2 expert. Return JSON with: obligations (array: {description,is_distinct,distinct_reasoning,satisfaction_method,satisfaction_criteria,estimated_timeline}), bundling_notes, total_obligations_count.`,`Contract: ${contract_description}`,{});});
+// contract-summarizer
+router.post('/contract-summarizer',async(req,res)=>{const{contract_text}=req.body;await handle(req,res,'/contract-summarizer',`You are a contract analyst. Return JSON with: summary, key_parties, contract_value, duration, deliverables, payment_structure, variable_elements, termination_terms, warranties, asc_606_considerations, risk_flags.`,`Contract:\n${contract_text}`,{});});
+// anomaly-detection (for period close)
+router.post('/anomaly-detection',async(req,res)=>{
+try{const period=req.query.period||req.body.period;
+const[je,rs,inv]=await Promise.all([pool.query('SELECT * FROM journal_entries WHERE entry_date >= NOW()-INTERVAL \'3 months\' ORDER BY entry_date DESC LIMIT 50'),pool.query('SELECT * FROM revenue_schedules ORDER BY period_start DESC LIMIT 50'),pool.query('SELECT * FROM invoices ORDER BY issue_date DESC LIMIT 50')]);
+await handle(req,res,'/anomaly-detection',`You are a revenue anomaly detector. Analyze journal entries, schedules, and invoices for irregularities. Return JSON with: anomalies (array: {type,description,amount,severity,recommendation}), overall_risk, summary.`,`Journal Entries: ${JSON.stringify(je.rows.slice(0,20))}\nRevenue Schedules: ${JSON.stringify(rs.rows.slice(0,20))}\nInvoices: ${JSON.stringify(inv.rows.slice(0,20))}\nPeriod: ${period||'current'}`,{period});
+}catch(e){res.status(500).json({error:e.message});}
 });
-
-// POST /api/ai/transaction-price-allocation
-router.post('/transaction-price-allocation', async (req, res) => {
-  try {
-    const { contract, performance_obligations, total_price } = req.body;
-
-    const systemPrompt = `You are an expert in ASC 606 Step 4: Allocate the Transaction Price.
-You must allocate the transaction price to each performance obligation based on relative standalone selling prices.
-If standalone selling prices are not directly observable, use estimation methods:
-- Adjusted market assessment approach
-- Expected cost plus margin approach
-- Residual approach (only in specific circumstances)
-
-Respond in JSON format with keys: allocation_method, allocations (array of {obligation, standalone_selling_price, allocated_amount, percentage}), total_allocated, notes, and any adjustments needed.`;
-
-    const userPrompt = `Allocate the transaction price for this contract:
-Total Price: $${total_price}
-Contract: ${JSON.stringify(contract, null, 2)}
-Performance Obligations: ${JSON.stringify(performance_obligations, null, 2)}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Transaction price allocation error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to allocate transaction price', details: err.message });
-  }
+// Generate revenue schedule for contract (deterministic + AI commentary)
+router.post('/generate-schedule/:contractId',async(req,res)=>{
+try{
+const cRes=await pool.query('SELECT * FROM contracts WHERE id=$1',[req.params.contractId]);
+if(!cRes.rows.length)return res.status(404).json({error:'Contract not found'});
+const c=cRes.rows[0];
+const start=new Date(c.start_date);const end=new Date(c.end_date);
+if(!c.start_date||!c.end_date||!c.total_value)return res.status(400).json({error:'Contract must have start_date, end_date, total_value'});
+// Compute months
+const months=[];let cur=new Date(start);
+while(cur<=end){months.push(new Date(cur));cur.setMonth(cur.getMonth()+1);}
+const monthlyAmount=parseFloat(c.total_value)/Math.max(months.length,1);
+// Insert schedule rows
+const inserted=[];
+for(const m of months){
+const ps=m.toISOString().slice(0,10);
+const pe=new Date(m.getFullYear(),m.getMonth()+1,0).toISOString().slice(0,10);
+try{const r=await pool.query('INSERT INTO revenue_schedules (contract_id,period_start,period_end,recognized_amount,deferred_amount,status,notes) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING RETURNING *',[c.id,ps,pe,monthlyAmount.toFixed(2),0,'scheduled',`AI-generated: ${c.title}`]);if(r.rows.length)inserted.push(r.rows[0]);}catch{}
+}
+// AI commentary
+const{parsed,raw,duration}=await callAI(`You are a revenue recognition expert. Provide commentary on this monthly recognition schedule. Return JSON with: commentary, recognition_method, risk_factors (array), audit_notes (array).`,`Contract: ${JSON.stringify(c)}\nSchedule: ${months.length} monthly periods of $${monthlyAmount.toFixed(2)} each\nTotal: $${c.total_value}`);
+await persistRun(req.user.id,'/generate-schedule',{contractId:req.params.contractId},{scheduleCount:inserted.length,...parsed},duration);
+res.json({success:true,schedules_created:inserted.length,monthly_amount:monthlyAmount.toFixed(2),periods:months.length,ai_commentary:parsed,schedules:inserted});
+}catch(e){res.status(500).json({error:e.message});}
 });
-
-// POST /api/ai/variable-consideration
-router.post('/variable-consideration', async (req, res) => {
-  try {
-    const { contract_terms, variable_elements } = req.body;
-
-    const systemPrompt = `You are an expert in ASC 606 variable consideration estimation.
-Variable consideration includes discounts, rebates, refunds, credits, price concessions, incentives, performance bonuses, penalties, and similar items.
-
-Two methods for estimating variable consideration:
-1. Expected value method - probability-weighted amount (best when there are many possible outcomes)
-2. Most likely amount method - single most likely amount (best when there are only two possible outcomes)
-
-Apply the constraint on variable consideration: include variable consideration only to the extent it is probable that a significant reversal will not occur.
-
-Respond in JSON format with keys: variable_elements_analysis (array), estimation_method, estimated_amount, constraint_assessment, recommended_transaction_price, and reasoning.`;
-
-    const userPrompt = `Estimate variable consideration for this contract:
-Contract Terms: ${JSON.stringify(contract_terms, null, 2)}
-Variable Elements: ${JSON.stringify(variable_elements, null, 2)}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Variable consideration error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to estimate variable consideration', details: err.message });
-  }
+// Period-close workflow
+router.post('/period-close',async(req,res)=>{
+try{const{period}=req.body;const steps=[];
+// Step 1: Leakage detection
+const[contracts,inv,schedules]=await Promise.all([pool.query('SELECT * FROM contracts LIMIT 20'),pool.query('SELECT * FROM invoices ORDER BY issue_date DESC LIMIT 30'),pool.query('SELECT * FROM revenue_schedules ORDER BY period_start DESC LIMIT 30')]);
+const{parsed:leakage,duration:d1}=await callAI(`Revenue leakage analyst. Return JSON: leakage_items (array), total_leakage_estimate, root_causes, recommendations.`,`Contracts:${JSON.stringify(contracts.rows.slice(0,10))}\nInvoices:${JSON.stringify(inv.rows.slice(0,10))}\nSchedules:${JSON.stringify(schedules.rows.slice(0,10))}`);
+steps.push({step:'leakage_detection',result:leakage});
+await persistRun(req.user.id,'/period-close/leakage',{period},{result:leakage},d1);
+// Step 2: Anomaly detection
+const je=await pool.query('SELECT * FROM journal_entries ORDER BY entry_date DESC LIMIT 30');
+const{parsed:anomalies,duration:d2}=await callAI(`Revenue anomaly detector. Return JSON: anomalies (array: {type,description,amount,severity}), overall_risk, summary.`,`Journal Entries:${JSON.stringify(je.rows.slice(0,15))}\nPeriod:${period||'current'}`);
+steps.push({step:'anomaly_detection',result:anomalies});
+await persistRun(req.user.id,'/period-close/anomaly',{period},{result:anomalies},d2);
+// Step 3: Audit readiness
+const{parsed:audit,duration:d3}=await callAI(`ASC 606 auditor. Return JSON: readiness_score (1-100), readiness_level, categories (array: {area,score,status,gaps}), priority_actions.`,`Period: ${period||'current'}\nContracts: ${contracts.rows.length}\nJournal Entries: ${je.rows.length}\nRevenue Schedules: ${schedules.rows.length}`);
+steps.push({step:'audit_readiness',result:audit});
+await persistRun(req.user.id,'/period-close/audit',{period},{result:audit},d3);
+res.json({period_close:period||'current',steps,completed_at:new Date().toISOString(),overall_readiness_score:audit?.readiness_score});
+}catch(e){res.status(500).json({error:e.message});}
 });
-
-// POST /api/ai/contract-modification
-router.post('/contract-modification', async (req, res) => {
-  try {
-    const { original_contract, modification } = req.body;
-
-    const systemPrompt = `You are an expert in ASC 606 contract modifications.
-A contract modification is a change in scope, price, or both that is approved by the parties.
-
-Three treatments for contract modifications:
-1. Separate contract - when modification adds distinct goods/services at standalone selling price
-2. Prospective treatment - when remaining goods/services are distinct from those already transferred
-3. Cumulative catch-up - when remaining goods/services are NOT distinct (treated as part of original contract)
-
-Analyze the modification and determine the correct treatment.
-Respond in JSON format with keys: modification_type, treatment (separate_contract/prospective/cumulative_catch_up), reasoning, impact_on_revenue, accounting_entries_needed, and recommendations.`;
-
-    const userPrompt = `Analyze this contract modification:
-Original Contract: ${JSON.stringify(original_contract, null, 2)}
-Modification: ${JSON.stringify(modification, null, 2)}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Contract modification error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to analyze contract modification', details: err.message });
-  }
+// contract-amendment-impact (what changes if contract modified)
+router.post('/contract-amendment-impact',async(req,res)=>{const{original_contract,proposed_amendment,recognition_to_date}=req.body;await handle(req,res,'/contract-amendment-impact',`You are an ASC 606 amendment-impact expert. Compare original vs proposed and quantify the revenue impact. Return JSON: {amendment_type, treatment:"prospective|cumulative_catchup|new_contract|hybrid", obligations_added:[], obligations_removed:[], price_reallocation:{old:[],new:[]}, cumulative_catchup_amount, future_revenue_delta, journal_entries:[{date,debit,credit,amount,rationale}], disclosure_implications:[], summary}.`,`Original:\n${JSON.stringify(original_contract)}\n\nProposed amendment:\n${JSON.stringify(proposed_amendment)}\n\nRecognition to date: ${JSON.stringify(recognition_to_date||{})}`,{});});
+// revenue-forecast-scenario (what-if scenarios)
+router.post('/revenue-forecast-scenario',async(req,res)=>{const{base_forecast,scenarios,assumptions}=req.body;await handle(req,res,'/revenue-forecast-scenario',`You are a revenue scenario analyst. Project base, upside, downside and custom scenarios with sensitivity. Return JSON: {scenarios:[{name,description,monthly_forecast:[{period,amount}], total, variance_vs_base, key_drivers, sensitivities:[{driver,low,base,high,impact}]}], best_case,worst_case,base_case,recommendation, summary}.`,`Base forecast:\n${JSON.stringify(base_forecast)}\n\nScenarios to model:\n${JSON.stringify(scenarios||['base','upside','downside'])}\n\nAssumptions:\n${JSON.stringify(assumptions||{})}`,{});});
+// performance-obligation-tracking (progress toward satisfaction)
+router.post('/performance-obligation-tracking',async(req,res)=>{const{obligations,measurement_method}=req.body;await handle(req,res,'/performance-obligation-tracking',`You are a performance-obligation tracking expert. Compute progress per obligation. Return JSON: {obligations:[{obligation_id,description,measurement_method,percent_complete,recognized_to_date,remaining_revenue,expected_completion_date,blockers:[],evidence:[],status:"on_track|at_risk|behind"}], aggregate_progress, at_risk_count, recommended_actions:[], summary}.`,`Obligations:\n${JSON.stringify(obligations||[])}\nMeasurement method preference: ${measurement_method||'mix'}`,{});});
+// AI History
+router.get('/history',async(req,res)=>{
+try{const page=Math.max(1,parseInt(req.query.page)||1);const limit=20;const offset=(page-1)*limit;
+const[r,c]=await Promise.all([pool.query('SELECT id,endpoint,model_used,duration_ms,created_at FROM ai_runs WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',[req.user.id,limit,offset]),pool.query('SELECT COUNT(*) FROM ai_runs WHERE user_id=$1',[req.user.id])]);
+const total=parseInt(c.rows[0].count);
+res.json({data:r.rows,pagination:{page,limit,total,totalPages:Math.ceil(total/limit)}});
+}catch(e){res.status(500).json({error:e.message});}
 });
-
-// POST /api/ai/risk-assessment
-router.post('/risk-assessment', async (req, res) => {
-  try {
-    const { contract } = req.body;
-
-    const systemPrompt = `You are a revenue recognition risk assessment expert.
-Assess the following risk categories for the contract:
-1. Credit risk - likelihood of customer payment default
-2. Performance risk - risk of not fulfilling obligations
-3. Regulatory risk - compliance and regulatory exposure
-4. Concentration risk - over-reliance on single customer/contract
-5. Variable consideration risk - uncertainty in transaction price
-6. Timing risk - risk related to revenue recognition timing
-
-Provide an overall risk score from 1-100 (1=lowest risk, 100=highest risk).
-Respond in JSON format with keys: overall_risk_score, risk_level (low/medium/high/critical), risk_categories (array of {category, score, description, mitigation}), key_concerns, and recommendations.`;
-
-    const userPrompt = `Assess risks for this contract:\n${JSON.stringify(contract, null, 2)}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Risk assessment error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to assess risks', details: err.message });
-  }
+router.get('/history/:id',async(req,res)=>{
+try{const r=await pool.query('SELECT * FROM ai_runs WHERE id=$1 AND user_id=$2',[req.params.id,req.user.id]);
+if(!r.rows.length)return res.status(404).json({error:'Not found'});res.json(r.rows[0]);}catch(e){res.status(500).json({error:e.message});}
 });
-
-// POST /api/ai/revenue-forecast
-router.post('/revenue-forecast', async (req, res) => {
-  try {
-    const { historical_data, forecast_periods } = req.body;
-
-    const systemPrompt = `You are a revenue forecasting expert specializing in SaaS and enterprise revenue.
-Analyze historical revenue data and provide forecasts with confidence intervals.
-
-Consider:
-- Trends and seasonality
-- Growth rates
-- Contract pipeline
-- Churn and renewal rates
-- Market conditions
-
-Respond in JSON format with keys: forecast (array of {period, predicted_amount, lower_bound, upper_bound, confidence_level}), methodology, assumptions, growth_rate, key_drivers, and caveats.`;
-
-    const userPrompt = `Forecast revenue based on this historical data:
-Historical Data: ${JSON.stringify(historical_data, null, 2)}
-Forecast Periods Requested: ${forecast_periods || 6}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Revenue forecast error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to forecast revenue', details: err.message });
-  }
+// reporting-quality-check (disclosure auditor / financial-statement quality review)
+router.post('/reporting-quality-check',async(req,res)=>{const{financial_disclosures,supporting_data,reporting_period}=req.body;await handle(req,res,'/reporting-quality-check',`You are an ASC 606 disclosure auditor. Score the quality of revenue-recognition disclosures and surface gaps. Return JSON: {quality_score (0-100), grade ("A"|"B"|"C"|"D"|"F"), gap_analysis:[{topic,current_disclosure,asc_606_requirement,gap,severity:"critical|high|medium|low"}], missing_disclosures:[], inconsistencies:[{location,issue,recommended_correction}], reviewer_questions:[], suggested_revisions:[{section,original,revised}], audit_workpaper_notes, executive_summary}.`,`Reporting period: ${reporting_period||'current'}\n\nDisclosures:\n${JSON.stringify(financial_disclosures||{})}\n\nSupporting data:\n${JSON.stringify(supporting_data||{})}`,{reporting_period});});
+// customer-portfolio-analytics (cross-customer revenue concentration + risk)
+router.post('/customer-portfolio-analytics',async(req,res)=>{
+try{
+const customers=req.body?.customers;const contracts=req.body?.contracts;
+let custRows=customers,contractRows=contracts;
+if(!custRows){try{const r=await pool.query('SELECT * FROM customers LIMIT 200');custRows=r.rows;}catch{custRows=[];}}
+if(!contractRows){try{const r=await pool.query('SELECT * FROM contracts LIMIT 500');contractRows=r.rows;}catch{contractRows=[];}}
+const userPrompt=`Customer portfolio analytics request.\n\nCustomers (${(custRows||[]).length}):\n${JSON.stringify((custRows||[]).slice(0,50))}\n\nContracts (${(contractRows||[]).length}):\n${JSON.stringify((contractRows||[]).slice(0,50))}`;
+await handle(req,res,'/customer-portfolio-analytics',`You are a revenue portfolio analyst. Identify concentration, churn risk, expansion opportunities and revenue quality across the customer base. Return JSON: {portfolio_summary:{total_customers,total_arr,top10_concentration_pct,hhi_index}, concentration_risk:{level,top_customers:[{customer,arr_share_pct}], notes}, segments:[{name,customers_count,arr,arr_share_pct,risk_level,characteristics:[]}], at_risk_accounts:[{customer,reason,arr,recommended_action}], expansion_opportunities:[{customer,signal,potential_arr_lift,recommended_play}], revenue_quality_score (0-100), action_items:[], executive_summary}.`,userPrompt,{customer_count:(custRows||[]).length,contract_count:(contractRows||[]).length});
+}catch(e){if(e.code==='NO_API_KEY')return res.status(503).json({success:false,error:'AI service unavailable: OPENROUTER_API_KEY not configured on server'});res.status(500).json({error:e.message});}
 });
-
-// POST /api/ai/journal-entry-suggestion
-router.post('/journal-entry-suggestion', async (req, res) => {
-  try {
-    const { revenue_event } = req.body;
-
-    const systemPrompt = `You are an expert accountant specializing in revenue recognition journal entries.
-For each revenue event, suggest the proper journal entries following ASC 606 and GAAP.
-
-Common revenue recognition entries include:
-- Debit: Accounts Receivable / Credit: Deferred Revenue (upon invoicing)
-- Debit: Deferred Revenue / Credit: Revenue (upon satisfaction of performance obligation)
-- Debit: Contract Asset / Credit: Revenue (revenue recognized before invoicing)
-- Debit: Cash / Credit: Accounts Receivable (upon payment)
-
-Respond in JSON format with keys: journal_entries (array of {date, description, debit_account, credit_account, amount, rationale}), explanation, asc_606_step, and notes.`;
-
-    const userPrompt = `Suggest journal entries for this revenue event:\n${JSON.stringify(revenue_event, null, 2)}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Journal entry suggestion error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to suggest journal entries', details: err.message });
-  }
-});
-
-// POST /api/ai/multi-element-arrangement
-router.post('/multi-element-arrangement', async (req, res) => {
-  try {
-    const { arrangement } = req.body;
-
-    const systemPrompt = `You are an expert in ASC 606 multi-element arrangements (bundled arrangements).
-Analyze bundled arrangements to:
-1. Identify separate performance obligations using the "distinct" criteria
-   - Customer can benefit from the good/service on its own or with readily available resources
-   - The promise is separately identifiable from other promises in the contract
-2. Determine if goods/services should be combined into a single performance obligation
-3. Recommend standalone selling price estimation for each obligation
-4. Suggest allocation methodology
-
-Respond in JSON format with keys: identified_obligations (array of {description, is_distinct, reasoning, satisfaction_method, estimated_ssp}), bundling_recommendations, allocation_approach, total_arrangement_value, and implementation_notes.`;
-
-    const userPrompt = `Analyze this multi-element arrangement:\n${JSON.stringify(arrangement, null, 2)}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Multi-element arrangement error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to analyze multi-element arrangement', details: err.message });
-  }
-});
-
-// POST /api/ai/customer-credit-analysis
-router.post('/customer-credit-analysis', async (req, res) => {
-  try {
-    const { customer } = req.body;
-
-    const systemPrompt = `You are an expert credit analyst for revenue recognition. Analyze customer creditworthiness for ASC 606 Step 1 (contract existence requires collectibility). Assess credit score, payment probability, recommended credit terms, and whether revenue should be recognized or constrained.
-Respond in JSON format with keys: credit_score, credit_grade (A/B/C/D/F), collectibility_assessment, payment_probability, recommended_terms, revenue_impact, recommendations.`;
-
-    const userPrompt = `Analyze the creditworthiness of this customer for revenue recognition purposes:\n${JSON.stringify(customer, null, 2)}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Customer credit analysis error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to perform customer credit analysis', details: err.message });
-  }
-});
-
-// POST /api/ai/invoice-anomaly-detection
-router.post('/invoice-anomaly-detection', async (req, res) => {
-  try {
-    const { invoices } = req.body;
-
-    const systemPrompt = `You are an expert in invoice analysis and fraud detection for revenue recognition. Detect anomalies like duplicate invoices, unusual amounts, timing irregularities, pattern breaks, potential bill-and-hold arrangements.
-Respond in JSON format with keys: anomalies (array of {invoice_id, type, severity, description, recommendation}), risk_summary, total_at_risk_amount, patterns_detected.`;
-
-    const userPrompt = `Analyze the following invoices for anomalies:\n${JSON.stringify(invoices, null, 2)}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Invoice anomaly detection error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to detect invoice anomalies', details: err.message });
-  }
-});
-
-// POST /api/ai/revenue-leakage-detection
-router.post('/revenue-leakage-detection', async (req, res) => {
-  try {
-    const { contracts, invoices, revenue_schedules } = req.body;
-
-    const systemPrompt = `You are an expert in revenue leakage analysis. Identify gaps between contracted amounts and recognized/billed revenue. Find unbilled revenue, missed escalations, unrecognized obligations, pricing errors.
-Respond in JSON format with keys: leakage_items (array of {source, description, estimated_amount, priority}), total_leakage_estimate, root_causes, recommendations.`;
-
-    const userPrompt = `Analyze the following data for revenue leakage:
-Contracts: ${JSON.stringify(contracts, null, 2)}
-Invoices: ${JSON.stringify(invoices, null, 2)}
-Revenue Schedules: ${JSON.stringify(revenue_schedules, null, 2)}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Revenue leakage detection error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to detect revenue leakage', details: err.message });
-  }
-});
-
-// POST /api/ai/contract-clause-analyzer
-router.post('/contract-clause-analyzer', async (req, res) => {
-  try {
-    const { contract_text, clauses } = req.body;
-
-    const systemPrompt = `You are an expert in contract analysis for revenue recognition impact. Analyze clauses for: right of return, warranties, licensing terms, termination provisions, most-favored-nation clauses, change of control, auto-renewal, price escalation, payment milestones.
-Respond in JSON format with keys: clauses_analysis (array of {clause, type, revenue_impact, asc_606_implication, risk_level, recommendation}), key_findings, overall_complexity.`;
-
-    const userPrompt = `Analyze the following contract clauses for revenue recognition impact:
-Contract Text: ${contract_text || 'N/A'}
-Clauses: ${JSON.stringify(clauses, null, 2)}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Contract clause analyzer error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to analyze contract clauses', details: err.message });
-  }
-});
-
-// POST /api/ai/audit-readiness
-router.post('/audit-readiness', async (req, res) => {
-  try {
-    const { company_data } = req.body;
-
-    const systemPrompt = `You are an expert auditor for ASC 606 compliance. Assess audit readiness across: documentation completeness, internal controls, policy documentation, judgments and estimates documentation, disclosure readiness, system capabilities.
-Respond in JSON format with keys: readiness_score (1-100), readiness_level, categories (array of {area, score, status, gaps, action_items}), priority_actions, estimated_preparation_time.`;
-
-    const userPrompt = `Assess the audit readiness for ASC 606 compliance based on this company data:\n${JSON.stringify(company_data, null, 2)}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Audit readiness error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to assess audit readiness', details: err.message });
-  }
-});
-
-// POST /api/ai/disclosure-generator
-router.post('/disclosure-generator', async (req, res) => {
-  try {
-    const { revenue_data, contracts_summary, accounting_policies } = req.body;
-
-    const systemPrompt = `You are an expert in ASC 606 financial statement disclosures. Generate required disclosures per ASC 606-10-50 including: disaggregation of revenue, contract balances, performance obligations, significant judgments, practical expedients used.
-Respond in JSON format with keys: disclosures (array of {section, title, content}), footnotes, required_tables, management_discussion_points.`;
-
-    const userPrompt = `Generate ASC 606 disclosures based on the following data:
-Revenue Data: ${JSON.stringify(revenue_data, null, 2)}
-Contracts Summary: ${JSON.stringify(contracts_summary, null, 2)}
-Accounting Policies: ${JSON.stringify(accounting_policies, null, 2)}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Disclosure generator error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to generate disclosures', details: err.message });
-  }
-});
-
-// POST /api/ai/ssp-estimator
-router.post('/ssp-estimator', async (req, res) => {
-  try {
-    const { product_or_service, market_data, cost_data, historical_prices } = req.body;
-
-    const systemPrompt = `You are an expert in standalone selling price estimation per ASC 606. Use three approaches: adjusted market assessment, expected cost plus margin, residual approach. Recommend the best method with justification.
-Respond in JSON format with keys: recommended_ssp, estimation_method, analysis (array for each method with {method, estimated_price, confidence, rationale}), supporting_evidence, documentation_notes.`;
-
-    const userPrompt = `Estimate the standalone selling price for the following:
-Product/Service: ${JSON.stringify(product_or_service, null, 2)}
-Market Data: ${JSON.stringify(market_data, null, 2)}
-Cost Data: ${JSON.stringify(cost_data, null, 2)}
-Historical Prices: ${JSON.stringify(historical_prices, null, 2)}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('SSP estimator error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to estimate standalone selling price', details: err.message });
-  }
-});
-
-// POST /api/ai/revenue-waterfall
-router.post('/revenue-waterfall', async (req, res) => {
-  try {
-    const { periods, opening_balances, new_bookings, recognitions, adjustments } = req.body;
-
-    const systemPrompt = `You are an expert in revenue waterfall analysis. Analyze the flow from deferred to recognized revenue across periods. Identify trends, seasonality, acceleration/deceleration patterns, and forecast future waterfalls.
-Respond in JSON format with keys: waterfall_analysis (array of {period, opening, additions, recognized, closing, recognition_rate}), trends, seasonality_factors, forecast_next_periods, insights.`;
-
-    const userPrompt = `Analyze the following revenue waterfall data:
-Periods: ${JSON.stringify(periods, null, 2)}
-Opening Balances: ${JSON.stringify(opening_balances, null, 2)}
-New Bookings: ${JSON.stringify(new_bookings, null, 2)}
-Recognitions: ${JSON.stringify(recognitions, null, 2)}
-Adjustments: ${JSON.stringify(adjustments, null, 2)}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Revenue waterfall error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to analyze revenue waterfall', details: err.message });
-  }
-});
-
-// POST /api/ai/obligation-identifier
-router.post('/obligation-identifier', async (req, res) => {
-  try {
-    const { contract_description } = req.body;
-
-    const systemPrompt = `You are an expert in identifying performance obligations per ASC 606 Step 2. From contract description, identify all distinct performance obligations. Apply the "distinct" test: (1) customer can benefit on its own or with readily available resources, (2) separately identifiable from other promises. Determine satisfaction method (point-in-time vs over time).
-Respond in JSON format with keys: obligations (array of {description, is_distinct, distinct_reasoning, satisfaction_method, satisfaction_criteria, estimated_timeline}), bundling_notes, total_obligations_count.`;
-
-    const userPrompt = `Identify the performance obligations in the following contract description:\n${contract_description}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Obligation identifier error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to identify performance obligations', details: err.message });
-  }
-});
-
-// POST /api/ai/contract-summarizer
-router.post('/contract-summarizer', async (req, res) => {
-  try {
-    const { contract_text } = req.body;
-
-    const systemPrompt = `You are an expert contract analyst. Summarize the contract focusing on revenue recognition implications: key terms, parties, deliverables, pricing structure, payment terms, variable elements, termination clauses, warranties, and ASC 606 considerations.
-Respond in JSON format with keys: summary, key_parties, contract_value, duration, deliverables, payment_structure, variable_elements, termination_terms, warranties, asc_606_considerations, risk_flags.`;
-
-    const userPrompt = `Summarize the following contract for revenue recognition purposes:\n${contract_text}`;
-
-    const result = await callOpenRouter(systemPrompt, userPrompt);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error('Contract summarizer error:', err.response?.data || err.message);
-    res.status(500).json({ success: false, error: 'Failed to summarize contract', details: err.message });
-  }
-});
-
-module.exports = router;
+module.exports=router;

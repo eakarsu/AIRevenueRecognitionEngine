@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const{authenticate}=require('../middleware/auth');
+router.use(authenticate);
+async function auditTrail(pool,userId,action,tableName,recordId,oldData,newData){try{await pool.query('INSERT INTO audit_trail (user_id,action,table_name,record_id,old_values,new_values) VALUES ($1,$2,$3,$4,$5,$6)',[userId,action,tableName,recordId,JSON.stringify(oldData),JSON.stringify(newData)]);}catch{}}
 
 // GET /api/performance-obligations
 router.get('/', async (req, res) => {
