@@ -4,7 +4,7 @@ const{body,validationResult}=require('express-validator');
 // CRITICAL: auth on ALL AI routes
 router.use(authenticate);router.use(aiRateLimiter);
 const OPENROUTER_URL='https://openrouter.ai/api/v1/chat/completions';
-const MODEL='anthropic/claude-3-5-sonnet-20241022';
+const MODEL=process.env.OPENROUTER_MODEL||'anthropic/claude-haiku-4.5';
 // 3-strategy JSON parser
 function parseAIJson(content){
 try{return JSON.parse(content);}catch{}
