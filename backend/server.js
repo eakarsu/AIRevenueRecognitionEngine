@@ -10,6 +10,7 @@ const authRoutes=require('./routes/auth');const customersRoutes=require('./route
 app.use('/api/auth',authRoutes);app.use('/api/customers',customersRoutes);app.use('/api/contracts',contractsRoutes);app.use('/api/performance-obligations',performanceObligationsRoutes);app.use('/api/revenue-schedules',revenueSchedulesRoutes);app.use('/api/journal-entries',journalEntriesRoutes);app.use('/api/invoices',invoicesRoutes);app.use('/api/audit-trail',auditTrailRoutes);app.use('/api/reports',reportsRoutes);app.use('/api/ai',aiRoutes);
 // Custom Views: ASC 606 RevRec specialized views (must be BEFORE 404 handler)
 app.use('/api/custom-views', require('./routes/customViews'));
+app.use('/api', require('./routes/production-readiness'));
 app.get('/api/health',(req,res)=>res.json({status:'ok',timestamp:new Date().toISOString()}));
 app.use((err,req,res,next)=>{console.error('Error:',err);res.status(err.status||500).json({error:err.message||'Internal server error'});});
 app.listen(PORT,()=>console.log(`Revenue Recognition Engine API on port ${PORT}`));
