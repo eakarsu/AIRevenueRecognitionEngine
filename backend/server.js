@@ -1,4 +1,4 @@
-const express=require('express');const cors=require('cors');const helmet=require('helmet');
+const express=require('express');const cors=require('cors');const helmet=require('helmet');const path=require('path');const fs=require('fs');
 require('dotenv').config({path:require('path').join(__dirname,'..', '.env')});
 const app=express();const PORT=process.env.PORT||3001;const CLIENT_URL=process.env.CLIENT_URL||'http://localhost:3000';
 const pool=require('./db');
@@ -10,12 +10,12 @@ const authRoutes=require('./routes/auth');const customersRoutes=require('./route
 app.use('/api/auth',authRoutes);app.use('/api/customers',customersRoutes);app.use('/api/contracts',contractsRoutes);app.use('/api/performance-obligations',performanceObligationsRoutes);app.use('/api/revenue-schedules',revenueSchedulesRoutes);app.use('/api/journal-entries',journalEntriesRoutes);app.use('/api/invoices',invoicesRoutes);app.use('/api/audit-trail',auditTrailRoutes);app.use('/api/reports',reportsRoutes);app.use('/api/ai',aiRoutes);
 // Custom Views: ASC 606 RevRec specialized views (must be BEFORE 404 handler)
 app.use('/api/custom-views', require('./routes/customViews'));
+app.use('/api/feature-modules', require('./routes/featureModules'));
+app.use('/api/system-chat', require('./routes/systemChat'));
+app.use('/api/exports', require('./routes/exports'));
+app.use('/api/integrations', require('./routes/integrations'));
+app.use('/api/ops', require('./routes/ops'));
 app.use('/api', require('./routes/production-readiness'));
-app.get('/api/health',(req,res)=>res.json({status:'ok',timestamp:new Date().toISOString()}));
-app.use((err,req,res,next)=>{console.error('Error:',err);res.status(err.status||500).json({error:err.message||'Internal server error'});});
-app.listen(PORT,()=>console.log(`Revenue Recognition Engine API on port ${PORT}`));
-module.exports=app;
-
 // AI feature mount: amendment-impact
 app.use('/api/ai/amendment-impact', require('./routes/ai-amendment-impact'));
 // === Batch 07 Gaps & Frontend Mounts ===
@@ -32,3 +32,15 @@ app.use('/api/gap-no-notificationsalerts-to-controllers', require('./routes/gap-
 app.use('/api/gap-no-multicurrency-fx-rate-management', require('./routes/gap-no-multicurrency-fx-rate-management'));
 app.use('/api/gap-no-periodclose-orchestration-ui', require('./routes/gap-no-periodclose-orchestration-ui'));
 // === End Batch 07 ===
+app.get('/api/health',(req,res)=>res.json({status:'ok',timestamp:new Date().toISOString()}));
+const frontendDist=path.join(__dirname,'..','frontend','dist');
+if(fs.existsSync(frontendDist)){
+  app.use(express.static(frontendDist));
+  app.use((req,res,next)=>{
+    if(req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(frontendDist,'index.html'));
+  });
+}
+app.use((err,req,res,next)=>{console.error('Error:',err);res.status(err.status||500).json({error:err.message||'Internal server error'});});
+app.listen(PORT,()=>console.log(`Revenue Recognition Engine API on port ${PORT}`));
+module.exports=app;

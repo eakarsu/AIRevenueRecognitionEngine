@@ -92,27 +92,31 @@ router.get('/compliance-status', async (req, res) => {
 router.get('/aging', async (req, res) => {
   try {
     const aging = await pool.query(
-      `SELECT
-        CASE
-          WHEN due_date >= CURRENT_DATE THEN 'Current'
-          WHEN due_date >= CURRENT_DATE - INTERVAL '30 days' THEN '1-30 days'
-          WHEN due_date >= CURRENT_DATE - INTERVAL '60 days' THEN '31-60 days'
-          WHEN due_date >= CURRENT_DATE - INTERVAL '90 days' THEN '61-90 days'
-          ELSE '90+ days'
-        END as aging_bucket,
-        COUNT(*) as invoice_count,
-        COALESCE(SUM(amount - paid_amount), 0) as outstanding_amount
-       FROM invoices
-       WHERE status NOT IN ('paid', 'cancelled')
+      `SELECT aging_bucket,
+              COUNT(*) as invoice_count,
+              COALESCE(SUM(outstanding_amount), 0) as outstanding_amount
+       FROM (
+         SELECT
+           CASE
+             WHEN due_date >= CURRENT_DATE THEN 'Current'
+             WHEN due_date >= CURRENT_DATE - INTERVAL '30 days' THEN '1-30 days'
+             WHEN due_date >= CURRENT_DATE - INTERVAL '60 days' THEN '31-60 days'
+             WHEN due_date >= CURRENT_DATE - INTERVAL '90 days' THEN '61-90 days'
+             ELSE '90+ days'
+           END as aging_bucket,
+           amount - paid_amount as outstanding_amount
+         FROM invoices
+         WHERE status NOT IN ('paid', 'cancelled')
+       ) aged
        GROUP BY aging_bucket
        ORDER BY
-        CASE aging_bucket
-          WHEN 'Current' THEN 1
-          WHEN '1-30 days' THEN 2
-          WHEN '31-60 days' THEN 3
-          WHEN '61-90 days' THEN 4
-          ELSE 5
-        END`
+         CASE aging_bucket
+           WHEN 'Current' THEN 1
+           WHEN '1-30 days' THEN 2
+           WHEN '31-60 days' THEN 3
+           WHEN '61-90 days' THEN 4
+           ELSE 5
+         END`
     );
 
     const totalOutstanding = await pool.query(

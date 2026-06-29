@@ -20,4 +20,21 @@ const authenticate = (req, res, next) => {
   }
 };
 
-module.exports = { authenticate, JWT_SECRET };
+const rolePermissions = {
+  admin: ['read', 'create', 'update', 'delete', 'export', 'ai_run', 'governance_approve'],
+  controller: ['read', 'create', 'update', 'export', 'ai_run'],
+  auditor: ['read', 'export'],
+  viewer: ['read'],
+  user: ['read', 'create', 'update'],
+};
+
+const requirePermission = (permission) => (req, res, next) => {
+  const role = req.user?.role || 'user';
+  const allowed = rolePermissions[role] || rolePermissions.user;
+  if (!allowed.includes(permission)) {
+    return res.status(403).json({ error: `Role ${role} lacks ${permission} permission` });
+  }
+  next();
+};
+
+module.exports = { authenticate, JWT_SECRET, requirePermission, rolePermissions };

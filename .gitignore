@@ -61,6 +61,7 @@ Thumbs.db
 *.db
 data/
 uploads/
+backups/
 tmp/
 .cache/
 

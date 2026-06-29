@@ -24,6 +24,7 @@ echo -e "${NC}"
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+mkdir -p "$SCRIPT_DIR/logs"
 
 # Load environment variables
 if [ -f .env ]; then
@@ -101,26 +102,54 @@ echo -e "${GREEN}[✓] Database seeded successfully${NC}"
 # Start backend with nodemon (auto-reload on changes)
 echo -e "${BLUE}[*] Starting backend server (port 3001) with auto-reload...${NC}"
 cd "$SCRIPT_DIR/backend"
-npx nodemon server.js &
+BACKEND_LOG="$SCRIPT_DIR/logs/backend.log"
+: > "$BACKEND_LOG"
+npx nodemon server.js 2>&1 | tee -a "$BACKEND_LOG" &
 BACKEND_PID=$!
 echo -e "${GREEN}[✓] Backend started (PID: $BACKEND_PID)${NC}"
 
 # Wait for backend to be ready
 echo -e "${BLUE}[*] Waiting for backend to be ready...${NC}"
+BACKEND_READY=false
 for i in {1..30}; do
-    if curl -s http://localhost:3001/api/auth/me > /dev/null 2>&1; then
+    if curl -fsS http://localhost:3001/api/health > /dev/null 2>&1; then
         echo -e "${GREEN}[✓] Backend is ready${NC}"
+        BACKEND_READY=true
         break
     fi
     sleep 1
 done
+if [ "$BACKEND_READY" != "true" ]; then
+    echo -e "${RED}[✗] Backend did not become ready. Last backend log lines:${NC}"
+    tail -n 40 "$BACKEND_LOG" || true
+    exit 1
+fi
 
 # Start frontend with hot reload
 echo -e "${BLUE}[*] Starting frontend (port 3000) with hot-reload...${NC}"
 cd "$SCRIPT_DIR/frontend"
-BROWSER=none PORT=3000 npm start &
+FRONTEND_LOG="$SCRIPT_DIR/logs/frontend.log"
+: > "$FRONTEND_LOG"
+BROWSER=none PORT=3000 npm start 2>&1 | tee -a "$FRONTEND_LOG" &
 FRONTEND_PID=$!
 echo -e "${GREEN}[✓] Frontend started (PID: $FRONTEND_PID)${NC}"
+
+# Wait for frontend to be ready
+echo -e "${BLUE}[*] Waiting for frontend to be ready...${NC}"
+FRONTEND_READY=false
+for i in {1..30}; do
+    if curl -fsS http://localhost:3000/ > /dev/null 2>&1; then
+        echo -e "${GREEN}[✓] Frontend is ready${NC}"
+        FRONTEND_READY=true
+        break
+    fi
+    sleep 1
+done
+if [ "$FRONTEND_READY" != "true" ]; then
+    echo -e "${RED}[✗] Frontend did not become ready. Last frontend log lines:${NC}"
+    tail -n 40 "$FRONTEND_LOG" || true
+    exit 1
+fi
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════╗"
@@ -130,6 +159,9 @@ echo -e "║  ${NC}Frontend:  ${GREEN}http://localhost:3000${CYAN}              
 echo -e "║  ${NC}Backend:   ${GREEN}http://localhost:3001${CYAN}              ║"
 echo -e "║                                              ║"
 echo -e "║  ${NC}Login:     ${YELLOW}admin@revrec.com / password123${CYAN}    ║"
+echo -e "║                                              ║"
+echo -e "║  ${NC}Logs:      ${YELLOW}logs/backend.log${CYAN}                  ║"
+echo -e "║             ${YELLOW}logs/frontend.log${CYAN}                 ║"
 echo -e "║                                              ║"
 echo -e "║  ${NC}Press ${RED}Ctrl+C${NC} to stop all services${CYAN}           ║"
 echo -e "╚══════════════════════════════════════════════╝${NC}"
@@ -149,5 +181,17 @@ cleanup() {
 
 trap cleanup SIGINT SIGTERM
 
-# Wait for both processes
-wait
+# Monitor both processes. If either one dies, stop the other and show logs.
+while true; do
+    if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+        echo -e "${RED}[✗] Backend process stopped. Last backend log lines:${NC}"
+        tail -n 60 "$BACKEND_LOG" || true
+        cleanup
+    fi
+    if ! kill -0 "$FRONTEND_PID" 2>/dev/null; then
+        echo -e "${RED}[✗] Frontend process stopped. Last frontend log lines:${NC}"
+        tail -n 60 "$FRONTEND_LOG" || true
+        cleanup
+    fi
+    sleep 2
+done

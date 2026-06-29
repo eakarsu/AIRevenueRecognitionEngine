@@ -1,0 +1,31 @@
+-- Operational modules, AI review metadata, file upload metadata, and external action state.
+
+CREATE TABLE IF NOT EXISTS feature_module_records (
+  id SERIAL PRIMARY KEY,
+  module_key TEXT NOT NULL,
+  reference TEXT NOT NULL,
+  title TEXT NOT NULL,
+  category TEXT,
+  status TEXT DEFAULT 'Open',
+  owner TEXT,
+  priority TEXT,
+  due_date DATE,
+  summary TEXT,
+  amount NUMERIC(15,2),
+  source_system TEXT,
+  risk_level TEXT,
+  ai_enabled BOOLEAN DEFAULT FALSE,
+  last_action TEXT,
+  ai_result JSONB,
+  file_name TEXT,
+  file_path TEXT,
+  file_size INTEGER,
+  mime_type TEXT,
+  uploaded_by TEXT,
+  approval_step TEXT,
+  approved_by TEXT,
+  approved_at TIMESTAMP,
+  external_status JSONB,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
