@@ -19,9 +19,16 @@ jobs:
       - name: Install backend
         run: npm ci
         working-directory: backend
-      - name: Backend smoke test
+      - name: Governed revenue tests
         run: npm test
         working-directory: backend
+      - name: Syntax and migration safety checks
+        run: |
+          node --check backend/server.js
+          node --check backend/routes/governedRevenue.js
+          node --check backend/domain/revenuePolicy.js
+          bash -n start.sh scripts/*.sh
+          ! grep -Eiq '(^|[[:space:]])(DROP[[:space:]]+TABLE|TRUNCATE|DELETE[[:space:]]+FROM)' backend/migrations/004_governed_revrec.sql
       - name: Install frontend
         run: npm ci
         working-directory: frontend

@@ -122,10 +122,29 @@ async function seed() {
     console.log('Seeding users...');
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash('password123', salt);
-    await client.query(
-      `INSERT INTO users (email, password_hash, name, role) VALUES ($1, $2, $3, $4)`,
+    const seededUser = await client.query(
+      `INSERT INTO users (email, password_hash, name, role) VALUES ($1, $2, $3, $4) RETURNING id`,
       ['admin@revrec.com', passwordHash, 'Admin User', 'admin']
     );
+    const governedTables = await client.query(
+      `SELECT to_regclass('public.revrec_tenants') IS NOT NULL AS tenants,
+              to_regclass('public.revrec_memberships') IS NOT NULL AS memberships`
+    );
+    if (governedTables.rows[0].tenants && governedTables.rows[0].memberships) {
+      const seededTenant = await client.query(
+        `INSERT INTO revrec_tenants (name)
+         SELECT 'Default Revenue Tenant'
+         WHERE NOT EXISTS (SELECT 1 FROM revrec_tenants)
+         RETURNING id`
+      );
+      const tenantId = seededTenant.rows[0]?.id || (await client.query('SELECT id FROM revrec_tenants ORDER BY id LIMIT 1')).rows[0].id;
+      await client.query(
+        `INSERT INTO revrec_memberships (tenant_id, user_id, role, active)
+         VALUES ($1, $2, 'admin', TRUE)
+         ON CONFLICT (tenant_id, user_id) DO UPDATE SET role='admin', active=TRUE`,
+        [tenantId, seededUser.rows[0].id]
+      );
+    }
 
     // Seed 15 customers
     console.log('Seeding customers...');
