@@ -2,7 +2,10 @@
 set -Eeuo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKEND_PORT="${PORT:-3001}"
+set -a
+source "$PROJECT_DIR/.env"
+set +a
+BACKEND_PORT="${BACKEND_PORT:-${PORT:-3001}}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 export ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-http://127.0.0.1:$FRONTEND_PORT,http://localhost:$FRONTEND_PORT}"
 
@@ -31,7 +34,7 @@ trap cleanup EXIT INT TERM
 
 (cd "$PROJECT_DIR/backend" && PORT="$BACKEND_PORT" npm start) &
 backend_pid=$!
-(cd "$PROJECT_DIR/frontend" && BROWSER=none PORT="$FRONTEND_PORT" npm start -- --host 127.0.0.1 --port "$FRONTEND_PORT") &
+(cd "$PROJECT_DIR/frontend" && BROWSER=none PORT="$FRONTEND_PORT" npm start -- --host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort) &
 frontend_pid=$!
 
 echo "Governed revenue API: http://localhost:$BACKEND_PORT"
