@@ -504,8 +504,8 @@ function SystemChat({ onNavigate }) {
 }
 
 function Login({ onLogin }) {
-  const [email, setEmail] = useState('admin@revrec.com')
-  const [password, setPassword] = useState('password123')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -534,8 +534,16 @@ function Login({ onLogin }) {
         {error && <div className="error">{error}</div>}
         <label>Email<input value={email} onChange={e => setEmail(e.target.value)} /></label>
         <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} /></label>
+        <button
+          type="button"
+          onClick={() => { setEmail(import.meta.env.VITE_DEMO_EMAIL || ''); setPassword(import.meta.env.VITE_DEMO_PASSWORD || ''); }}
+          disabled={!import.meta.env.VITE_DEMO_EMAIL || !import.meta.env.VITE_DEMO_PASSWORD}
+          aria-label="Auto Fill Demo Credentials"
+          style={{ width: '100%', marginBottom: '12px', padding: '10px 14px', borderRadius: '8px', border: '1px solid currentColor', background: 'transparent', cursor: 'pointer' }}
+        >
+          Auto Fill Demo Credentials
+        </button>
         <button disabled={loading}>{loading ? 'Signing in...' : 'Sign in'}</button>
-        <small>Default login: admin@revrec.com / password123</small>
       </form>
     </div>
   )
