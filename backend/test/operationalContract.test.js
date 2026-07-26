@@ -18,12 +18,14 @@ test('migration is additive and guards immutable evidence',()=>{
   for(const guard of ['prevent_revrec_evidence_mutation','guard_revrec_journal_evidence','guard_revrec_period_lock'])assert.match(sql,new RegExp(guard));
 });
 
-test('server exposes only health, tenant auth, and governed revenue surfaces',()=>{
+test('server exposes authenticated operational and governed revenue surfaces before its 404 fallback',()=>{
   const server=read('backend/server.js');
   assert.match(server,/\/api\/governed-revenue/);
   assert.match(server,/\/api\/auth/);
-  assert.doesNotMatch(server,/routes\/(?:ai|gap-|contracts|journals|recognition|dashboard)/i);
+  for(const route of ['customers','contracts','performance-obligations','revenue-schedules','journal-entries','invoices','audit-trail','reports','ai','feature-modules','exports','integrations'])assert.ok(server.includes(`/api/${route}`),`missing /api/${route}`);
+  assert.match(server,/\/api\/reports['"], authenticate/);
   assert.match(server,/status\(404\)/);
+  assert.ok(server.indexOf("/api/reports")<server.indexOf('status(404)'), 'report routes must mount before the API 404 fallback');
 });
 
 test('governed route covers source evidence, close controls, adjustments, posting, reconciliation, replay, and export',()=>{

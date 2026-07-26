@@ -44,7 +44,7 @@ const featureModules = [
   { key: 'ai-evidence-completeness', label: 'AI Evidence Completeness', endpoint: '/feature-modules/ai-evidence-completeness', moduleKey: 'ai-evidence-completeness', aiEnabled: true },
 ]
 
-const allResources = [...resources, ...featureModules]
+const allResources = [...resources, ...featureModules.filter(module => !module.aiEnabled)]
 
 const readOnlyFields = new Set([
   'id',
@@ -117,6 +117,151 @@ const aiTools = [
   { key: 'ssp-estimator', label: 'SSP Estimator', endpoint: '/ai/ssp-estimator', payload: { product_or_service: 'Premium SaaS support', market_data: 'Enterprise customers pay 15-25% of license value', cost_data: { support_cost: 180000 } } },
   { key: 'period-close', label: 'Period Close Workflow', endpoint: '/ai/period-close', payload: { period: '2026-06' } },
 ]
+
+const aiModuleInputSchemas = {
+  'document-repository': [
+    ['documentType', 'Document type', 'Contract amendment, order form, or policy'],
+    ['contractReference', 'Contract reference', 'CTR-2026-001'],
+    ['reviewFocus', 'Review focus', 'Identify terms affecting timing, price, and performance obligations'],
+    ['documentText', 'Document text or evidence summary', 'Paste the clauses or evidence to analyze', 'textarea'],
+  ],
+  'approval-workflows': [
+    ['decisionContext', 'Decision context', 'Describe the revenue decision awaiting approval', 'textarea'],
+    ['approverRole', 'Required approver role', 'Revenue Controller'],
+    ['riskThreshold', 'Risk threshold', 'High'],
+    ['supportingEvidence', 'Supporting evidence', 'List the evidence available to the approver', 'textarea'],
+  ],
+  'period-close': [
+    ['reportingPeriod', 'Reporting period', '2026-07'],
+    ['closeStage', 'Close stage', 'Pre-close review'],
+    ['materiality', 'Materiality threshold', '25000'],
+    ['knownExceptions', 'Known exceptions', 'Describe open anomalies or reconciliation gaps', 'textarea'],
+  ],
+  'live-erp-integrations': [
+    ['sourceSystem', 'Source system', 'NetSuite'],
+    ['objectType', 'Object or feed', 'Revenue arrangements'],
+    ['syncWindow', 'Sync window', '2026-07-01 through 2026-07-31'],
+    ['reconciliationRules', 'Reconciliation rules', 'Describe totals, keys, and exception tolerances', 'textarea'],
+  ],
+  'notification-delivery': [
+    ['audience', 'Audience', 'Revenue Controller and Audit Manager'],
+    ['trigger', 'Notification trigger', 'High-risk close exception'],
+    ['deliveryChannel', 'Delivery channel', 'Email and Slack'],
+    ['messageContext', 'Message context', 'Describe the decision, deadline, and requested action', 'textarea'],
+  ],
+  'rbac-enforcement': [
+    ['actorRole', 'Actor role', 'Revenue Accountant'],
+    ['requestedAction', 'Requested action', 'Approve journal proposal'],
+    ['resourceScope', 'Resource scope', 'July 2026 revenue close'],
+    ['segregationContext', 'Segregation-of-duties context', 'Describe preparer, reviewer, and posting responsibilities', 'textarea'],
+  ],
+  'file-intelligence': [
+    ['fileType', 'File type', 'PDF contract'],
+    ['extractionGoal', 'Extraction goal', 'Performance obligations and transaction price'],
+    ['qualityConcerns', 'Quality concerns', 'Scanned pages, tables, and handwritten annotations'],
+    ['fileSummary', 'File summary', 'Describe the file contents or paste extracted text', 'textarea'],
+  ],
+  'background-jobs': [
+    ['jobType', 'Job type', 'Revenue schedule recalculation'],
+    ['executionWindow', 'Execution window', 'After nightly billing sync'],
+    ['retryPolicy', 'Retry policy', '3 attempts with exponential backoff'],
+    ['jobPayload', 'Job inputs', 'Describe contracts, period, and processing constraints', 'textarea'],
+  ],
+  'production-hardening': [
+    ['controlArea', 'Control area', 'Availability and recovery'],
+    ['serviceTarget', 'Service target', '99.9% monthly availability'],
+    ['failureScenario', 'Failure scenario', 'Describe the production failure to assess', 'textarea'],
+    ['currentSafeguards', 'Current safeguards', 'List monitoring, backups, and recovery controls', 'textarea'],
+  ],
+  'ai-governance': [
+    ['useCase', 'AI use case', 'ASC 606 contract review'],
+    ['modelAndVersion', 'Model and version', 'Configured revenue copilot model'],
+    ['decisionImpact', 'Decision impact', 'Advisory; no automatic posting'],
+    ['evaluationEvidence', 'Evaluation evidence', 'Describe test cases, reviewer criteria, and observed limitations', 'textarea'],
+  ],
+  'change-history': [
+    ['entity', 'Changed entity', 'Revenue schedule'],
+    ['changeWindow', 'Change window', 'July 2026 close'],
+    ['expectedChange', 'Expected change', 'Approved catch-up adjustment'],
+    ['investigationQuestion', 'Investigation question', 'Describe the change or anomaly to trace', 'textarea'],
+  ],
+  'ai-contract-extraction': [
+    ['contractType', 'Contract type', 'Enterprise SaaS agreement'],
+    ['customer', 'Customer', 'Vertex Cloud Solutions'],
+    ['effectivePeriod', 'Effective period', '2026-01-01 through 2026-12-31'],
+    ['contractText', 'Contract text', 'Paste contract clauses covering deliverables, pricing, and acceptance', 'textarea'],
+  ],
+  'ai-obligation-identifier': [
+    ['arrangementType', 'Arrangement type', 'Software, implementation, and support'],
+    ['customerBenefit', 'Customer benefit', 'Describe how the customer benefits from each promise', 'textarea'],
+    ['integrationDependency', 'Integration dependency', 'Describe whether promises significantly modify or integrate each other', 'textarea'],
+    ['contractPromises', 'Contract promises', 'List explicit and implicit goods or services', 'textarea'],
+  ],
+  'ai-schedule-generator': [
+    ['contractValue', 'Contract value', '2500000'],
+    ['recognitionMethod', 'Recognition method', 'Over time, straight line'],
+    ['servicePeriod', 'Service period', '2026-01-01 through 2026-12-31'],
+    ['satisfactionEvents', 'Satisfaction events', 'Describe milestones, usage, delivery, or acceptance evidence', 'textarea'],
+  ],
+  'ai-disclosure-drafting': [
+    ['reportingPeriod', 'Reporting period', 'FY 2026'],
+    ['framework', 'Accounting framework', 'ASC 606'],
+    ['materialBalances', 'Material balances', 'Recognized revenue, contract assets, and contract liabilities', 'textarea'],
+    ['policyContext', 'Policy and judgment context', 'Describe significant judgments, methods, and remaining obligations', 'textarea'],
+  ],
+  'ai-close-anomalies': [
+    ['reportingPeriod', 'Reporting period', '2026-07'],
+    ['population', 'Population reviewed', 'Journal entries, schedules, and invoices'],
+    ['materiality', 'Materiality threshold', '25000'],
+    ['anomalySignals', 'Anomaly signals', 'Describe unusual timing, amounts, users, or status changes', 'textarea'],
+  ],
+  'ai-leakage-monitor': [
+    ['reviewPeriod', 'Review period', 'Q3 2026'],
+    ['revenueStreams', 'Revenue streams', 'Subscriptions, usage, services, and renewals'],
+    ['tolerance', 'Variance tolerance', '1% or $10000'],
+    ['suspectedLeakage', 'Suspected leakage signals', 'Describe unbilled usage, missed escalators, credits, or under-recognition', 'textarea'],
+  ],
+  'ai-approval-risk': [
+    ['approvalType', 'Approval type', 'Journal proposal'],
+    ['amount', 'Amount', '875000'],
+    ['requestorRole', 'Requestor role', 'Revenue Accountant'],
+    ['riskEvidence', 'Risk and evidence context', 'Describe unusual terms, overrides, conflicts, and supporting evidence', 'textarea'],
+  ],
+  'ai-customer-risk': [
+    ['customerName', 'Customer name', 'Atlas Manufacturing Inc'],
+    ['openReceivables', 'Open receivables', '340000'],
+    ['creditRating', 'Credit rating', 'BBB'],
+    ['riskSignals', 'Collectibility signals', 'Describe payment history, disputes, concessions, and renewal risk', 'textarea'],
+  ],
+  'ai-evidence-completeness': [
+    ['controlOrAssertion', 'Control or assertion', 'Revenue occurrence and cutoff'],
+    ['requiredEvidence', 'Required evidence', 'Signed contract, delivery proof, invoice, and approval'],
+    ['availableEvidence', 'Available evidence', 'List the evidence currently attached', 'textarea'],
+    ['knownGaps', 'Known gaps', 'Describe missing, stale, conflicting, or unapproved evidence', 'textarea'],
+  ],
+}
+
+function initialModuleInputs(moduleKey) {
+  return Object.fromEntries((aiModuleInputSchemas[moduleKey] || []).map(([key, _label, placeholder]) => [key, placeholder]))
+}
+
+function toolFormFromPayload(payload) {
+  return Object.fromEntries(Object.entries(payload).map(([key, value]) => [
+    key,
+    typeof value === 'string' || typeof value === 'number' ? String(value) : JSON.stringify(value, null, 2),
+  ]))
+}
+
+function payloadFromToolForm(tool, form) {
+  return Object.fromEntries(Object.entries(tool.payload).map(([key, original]) => {
+    const value = form[key] ?? ''
+    if (typeof original === 'number') return [key, Number(value)]
+    if (typeof original === 'object') {
+      try { return [key, JSON.parse(value)] } catch { throw new Error(`${titleize(key)} must contain valid JSON`) }
+    }
+    return [key, value]
+  }))
+}
 
 function getToken() {
   return localStorage.getItem('revrec_token') || ''
@@ -536,10 +681,10 @@ function Login({ onLogin }) {
         <label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} /></label>
         <button
           type="button"
+          className="demo-credentials-button"
           onClick={() => { setEmail(import.meta.env.VITE_DEMO_EMAIL || ''); setPassword(import.meta.env.VITE_DEMO_PASSWORD || ''); }}
           disabled={!import.meta.env.VITE_DEMO_EMAIL || !import.meta.env.VITE_DEMO_PASSWORD}
           aria-label="Auto Fill Demo Credentials"
-          style={{ width: '100%', marginBottom: '12px', padding: '10px 14px', borderRadius: '8px', border: '1px solid currentColor', background: 'transparent', cursor: 'pointer' }}
         >
           Auto Fill Demo Credentials
         </button>
@@ -744,17 +889,24 @@ function ReportsPage() {
 
 function AIToolsPage() {
   const [active, setActive] = useState(aiTools[0])
+  const [form, setForm] = useState(() => toolFormFromPayload(aiTools[0].payload))
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  async function run(tool = active) {
+  function chooseTool(tool) {
     setActive(tool)
+    setForm(toolFormFromPayload(tool.payload))
+    setResult(null)
+    setError('')
+  }
+
+  async function run(tool = active) {
     setLoading(true)
     setError('')
     setResult(null)
     try {
-      const data = await request(tool.endpoint, { method: 'POST', body: JSON.stringify(tool.payload) })
+      const data = await request(tool.endpoint, { method: 'POST', body: JSON.stringify(payloadFromToolForm(tool, form)) })
       setResult(data)
     } catch (err) {
       setError(err.message)
@@ -765,10 +917,114 @@ function AIToolsPage() {
 
   return (
     <main className="content">
-      <div className="page-title"><div><h1>AI Workbench</h1><p>Run ASC 606 AI analysis using seeded revenue data examples.</p></div><button onClick={() => run()} disabled={loading}>{loading ? 'Running...' : `Run ${active.label}`}</button></div>
+      <div className="page-title"><div><h1>AI Workbench</h1><p>Enter the revenue facts and assumptions the selected ASC 606 analysis should evaluate.</p></div><button onClick={() => run()} disabled={loading}>{loading ? 'Running...' : `Run ${active.label}`}</button></div>
       <div className="tool-grid">
-        {aiTools.map(tool => <button className={active.key === tool.key ? 'tool active' : 'tool'} key={tool.key} onClick={() => setActive(tool)}>{tool.label}</button>)}
+        {aiTools.map(tool => <button className={active.key === tool.key ? 'tool active' : 'tool'} key={tool.key} onClick={() => chooseTool(tool)}>{tool.label}</button>)}
       </div>
+      <section className="ai-input-panel">
+        <div className="ai-form-heading">
+          <div><span>Analysis inputs</span><small>Review and edit the seeded example before running the model.</small></div>
+          <span className="ai-badge">{active.label}</span>
+        </div>
+        <div className="ai-input-grid">
+          {Object.entries(active.payload).map(([key, original]) => {
+            const complex = typeof original === 'object'
+            return (
+              <label className={complex ? 'wide' : ''} key={key}>
+                <span>{titleize(key)}</span>
+                {complex ? (
+                  <textarea rows={Math.min(12, Math.max(5, String(form[key] || '').split('\n').length + 1))} value={form[key] || ''} onChange={event => setForm(current => ({ ...current, [key]: event.target.value }))} />
+                ) : (
+                  <input type={typeof original === 'number' ? 'number' : 'text'} value={form[key] || ''} onChange={event => setForm(current => ({ ...current, [key]: event.target.value }))} />
+                )}
+              </label>
+            )
+          })}
+        </div>
+      </section>
+      {error && <div className="error">{error}</div>}
+      {result && <AIReport data={result} />}
+    </main>
+  )
+}
+
+function AIModuleWorkspace({ module }) {
+  const schema = aiModuleInputSchemas[module.key] || []
+  const [records, setRecords] = useState([])
+  const [recordId, setRecordId] = useState('')
+  const [inputs, setInputs] = useState(() => initialModuleInputs(module.key))
+  const [result, setResult] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    setLoading(true)
+    setError('')
+    setResult(null)
+    setInputs(initialModuleInputs(module.key))
+    request(module.endpoint)
+      .then(data => {
+        const nextRecords = normalizeRows(data)
+        setRecords(nextRecords)
+        setRecordId(nextRecords[0]?.id ? String(nextRecords[0].id) : '')
+      })
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false))
+  }, [module.endpoint, module.key])
+
+  async function runAnalysis(event) {
+    event.preventDefault()
+    if (!recordId) return setError('Choose a workflow record to provide audited context.')
+    setRunning(true)
+    setError('')
+    setResult(null)
+    try {
+      const data = await request(`/feature-modules/${module.moduleKey}/${recordId}/run`, {
+        method: 'POST',
+        body: JSON.stringify({ inputs }),
+      })
+      setResult(data.analysis || data)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <main className="content">
+      <div className="page-title">
+        <div><h1>{module.label}</h1><p>Source-specific AI analysis with explicit business inputs and an auditable workflow record.</p></div>
+      </div>
+      <form className="ai-input-panel" onSubmit={runAnalysis}>
+        <div className="ai-form-heading">
+          <div><span>Analysis request</span><small>The selected record supplies context; these fields define the question the AI must answer.</small></div>
+          <span className="ai-badge">AI workflow</span>
+        </div>
+        <div className="ai-input-grid">
+          <label className="wide">
+            <span>Workflow evidence record</span>
+            <select value={recordId} onChange={event => setRecordId(event.target.value)} disabled={loading}>
+              {records.map(record => <option key={record.id} value={record.id}>{record.reference} — {record.title}</option>)}
+            </select>
+          </label>
+          {schema.map(([key, label, placeholder, type]) => (
+            <label className={type === 'textarea' ? 'wide' : ''} key={key}>
+              <span>{label}</span>
+              {type === 'textarea' ? (
+                <textarea rows="5" value={inputs[key] || ''} placeholder={placeholder} onChange={event => setInputs(current => ({ ...current, [key]: event.target.value }))} />
+              ) : (
+                <input value={inputs[key] || ''} placeholder={placeholder} onChange={event => setInputs(current => ({ ...current, [key]: event.target.value }))} />
+              )}
+            </label>
+          ))}
+        </div>
+        <div className="ai-form-actions">
+          <span>{records.length} governed context records available</span>
+          <button type="submit" disabled={loading || running || !recordId}>{running ? 'Analyzing...' : `Run ${module.label}`}</button>
+        </div>
+      </form>
       {error && <div className="error">{error}</div>}
       {result && <AIReport data={result} />}
     </main>
@@ -1138,6 +1394,7 @@ function App() {
   if (!user || !getToken()) return <Login onLogin={setUser} />
 
   const currentResource = allResources.find(r => r.key === view)
+  const currentAIModule = featureModules.find(r => r.aiEnabled && r.key === view)
 
   return (
     <div className="app-shell">
@@ -1157,6 +1414,7 @@ function App() {
       </aside>
       {view === 'dashboard' && <Dashboard setView={setView} />}
       {currentResource && <DataPage resource={currentResource} />}
+      {currentAIModule && <AIModuleWorkspace module={currentAIModule} />}
       {view === 'reports' && <ReportsPage />}
       {view === 'ai' && <AIToolsPage />}
       <SystemChat onNavigate={setView} />

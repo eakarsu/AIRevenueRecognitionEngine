@@ -227,7 +227,7 @@ function parseAIJson(content) {
   return { executive_summary: content };
 }
 
-async function callOpenRouter(moduleDef, row) {
+async function callOpenRouter(moduleDef, row, inputs = {}) {
   const apiKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
   if (!apiKey) return mockAnalysis(moduleDef, row);
   try {
@@ -239,7 +239,7 @@ async function callOpenRouter(moduleDef, row) {
         temperature: 0.2,
         messages: [
           { role: 'system', content: 'You are an ASC 606 revenue recognition operations copilot. Return only valid JSON with no markdown fences. Use keys: executive_summary, key_findings, recommended_actions, controls_impact, confidence.' },
-          { role: 'user', content: `Module: ${moduleDef.label}\nRecord: ${JSON.stringify(row)}` },
+          { role: 'user', content: `Module: ${moduleDef.label}\nGoverned record: ${JSON.stringify(row)}\nUser analysis inputs: ${JSON.stringify(inputs)}` },
         ],
       }),
     });
@@ -510,7 +510,10 @@ router.post('/:moduleKey/:id/run', requirePermission('ai_run'), async (req, res)
   if (!moduleDef) return res.status(404).json({ error: 'Feature module not found' });
   const { rows } = await pool.query('SELECT * FROM feature_module_records WHERE id=$1 AND module_key=$2', [req.params.id, moduleDef.key]);
   if (!rows.length) return res.status(404).json({ error: 'Record not found' });
-  const analysis = await callOpenRouter(moduleDef, rows[0]);
+  const inputs = req.body?.inputs && typeof req.body.inputs === 'object' && !Array.isArray(req.body.inputs)
+    ? req.body.inputs
+    : {};
+  const analysis = await callOpenRouter(moduleDef, rows[0], inputs);
   const updated = await pool.query(
     `UPDATE feature_module_records
         SET ai_result=$1, last_action=$2, updated_at=NOW()
@@ -518,7 +521,7 @@ router.post('/:moduleKey/:id/run', requirePermission('ai_run'), async (req, res)
     [JSON.stringify(analysis), 'AI review completed', req.params.id]
   );
   await auditFeatureAction(req, 'AI_REVIEW', rows[0], updated.rows[0]);
-  res.json({ success: true, analysis, record: updated.rows[0] });
+  res.json({ success: true, analysis, inputs, record: updated.rows[0] });
 });
 
 module.exports = router;
