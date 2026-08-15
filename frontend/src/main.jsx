@@ -46,6 +46,13 @@ const featureModules = [
 ]
 
 const allResources = [...resources, ...featureModules.filter(module => !module.aiEnabled)]
+const navigationViews = new Set(['dashboard', 'decision-center', 'reports', 'ai', ...resources.map(item => item.key), ...featureModules.map(item => item.key)])
+
+function viewFromLocation() {
+  if (typeof window === 'undefined') return 'dashboard'
+  const requested = window.location.hash.replace(/^#\/?/, '')
+  return navigationViews.has(requested) ? requested : 'dashboard'
+}
 
 const readOnlyFields = new Set([
   'id',
@@ -1390,7 +1397,25 @@ function App() {
   const [user, setUser] = useState(() => {
     try { return JSON.parse(localStorage.getItem('revrec_user') || 'null') } catch { return null }
   })
-  const [view, setView] = useState('dashboard')
+  const [view, setView] = useState(viewFromLocation)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+
+  useEffect(() => {
+    const restoreView = () => setView(viewFromLocation())
+    window.addEventListener('popstate', restoreView)
+    return () => window.removeEventListener('popstate', restoreView)
+  }, [])
+
+  function navigate(nextView) {
+    if (!navigationViews.has(nextView)) return
+    setView(nextView)
+    setMobileNavOpen(false)
+    const nextHash = `#/${nextView}`
+    if (window.location.hash !== nextHash) window.history.pushState({ view: nextView }, '', nextHash)
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 980px)').matches) {
+      window.setTimeout(() => document.getElementById('main-view')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
+    }
+  }
 
   if (!user || !getToken()) return <Login onLogin={setUser} />
 
@@ -1399,28 +1424,33 @@ function App() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside className={mobileNavOpen ? 'sidebar mobile-open' : 'sidebar'}>
         <div className="sidebar-brand"><strong>RevRec AI</strong><span>ASC 606 Platform</span></div>
-        <button className={view === 'dashboard' ? 'active' : ''} onClick={() => setView('dashboard')}>Dashboard</button>
+        <button type="button" className="sidebar-toggle" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(open => !open)}>
+          <span>{mobileNavOpen ? 'Close navigation' : 'Open navigation'}</span><span aria-hidden="true">{mobileNavOpen ? '×' : '☰'}</span>
+        </button>
+        <button className={view === 'dashboard' ? 'active' : ''} onClick={() => navigate('dashboard')}>Dashboard</button>
         <div className="sidebar-section">Core Revenue</div>
-        {resources.map(r => <button className={view === r.key ? 'active' : ''} onClick={() => setView(r.key)} key={r.key}>{r.label}</button>)}
+        {resources.map(r => <button className={view === r.key ? 'active' : ''} onClick={() => navigate(r.key)} key={r.key}>{r.label}</button>)}
         <div className="sidebar-section">Operations</div>
-        {featureModules.filter(r => !r.aiEnabled).map(r => <button className={view === r.key ? 'active' : ''} onClick={() => setView(r.key)} key={r.key}>{r.label}</button>)}
+        {featureModules.filter(r => !r.aiEnabled).map(r => <button className={view === r.key ? 'active' : ''} onClick={() => navigate(r.key)} key={r.key}>{r.label}</button>)}
         <div className="sidebar-section">AI Modules</div>
-        {featureModules.filter(r => r.aiEnabled).map(r => <button className={view === r.key ? 'active' : ''} onClick={() => setView(r.key)} key={r.key}>{r.label}</button>)}
+        {featureModules.filter(r => r.aiEnabled).map(r => <button className={view === r.key ? 'active' : ''} onClick={() => navigate(r.key)} key={r.key}>{r.label}</button>)}
         <div className="sidebar-section">Analysis</div>
-        <button className={view === 'decision-center' ? 'active' : ''} onClick={() => setView('decision-center')}>Decision Center</button>
-        <button className={view === 'reports' ? 'active' : ''} onClick={() => setView('reports')}>Reports</button>
-        <button className={view === 'ai' ? 'active' : ''} onClick={() => setView('ai')}>AI Workbench</button>
+        <button className={view === 'decision-center' ? 'active' : ''} onClick={() => navigate('decision-center')}>Decision Center</button>
+        <button className={view === 'reports' ? 'active' : ''} onClick={() => navigate('reports')}>Reports</button>
+        <button className={view === 'ai' ? 'active' : ''} onClick={() => navigate('ai')}>AI Workbench</button>
         <button className="logout" onClick={() => { localStorage.removeItem('revrec_token'); localStorage.removeItem('revrec_user'); setUser(null) }}>Logout</button>
       </aside>
-      {view === 'dashboard' && <Dashboard setView={setView} />}
-      {view === 'decision-center' && <DecisionCenter />}
-      {currentResource && <DataPage resource={currentResource} />}
-      {currentAIModule && <AIModuleWorkspace module={currentAIModule} />}
-      {view === 'reports' && <ReportsPage />}
-      {view === 'ai' && <AIToolsPage />}
-      <SystemChat onNavigate={setView} />
+      <div id="main-view" className="view-shell">
+        {view === 'dashboard' && <Dashboard setView={navigate} />}
+        {view === 'decision-center' && <DecisionCenter />}
+        {currentResource && <DataPage resource={currentResource} />}
+        {currentAIModule && <AIModuleWorkspace module={currentAIModule} />}
+        {view === 'reports' && <ReportsPage />}
+        {view === 'ai' && <AIToolsPage />}
+      </div>
+      <SystemChat onNavigate={navigate} />
     </div>
   )
 }

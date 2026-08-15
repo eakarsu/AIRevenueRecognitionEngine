@@ -116,6 +116,7 @@ button { cursor: pointer; }
 }
 .sidebar button:hover, .sidebar button.active { background: #21314a; color: #fff; }
 .sidebar .logout { margin-top: auto; color: #ffcdcd; }
+.sidebar-toggle { display: none; }
 .sidebar-section {
   color: #7f8ca3;
   font-size: 11px;
@@ -124,6 +125,8 @@ button { cursor: pointer; }
   text-transform: uppercase;
   padding: 14px 8px 4px;
 }
+
+.view-shell { min-width: 0; }
 
 .content {
   padding: 28px;
@@ -654,7 +657,29 @@ dd { margin: 0; color: #273347; overflow-wrap: anywhere; }
 
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 1fr; }
-  .sidebar { position: relative; height: auto; }
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    height: auto;
+    max-height: min(78vh, 640px);
+    padding: 12px;
+    overflow-y: auto;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, .2);
+  }
+  .sidebar-brand { padding: 4px 8px 10px; margin-bottom: 0; }
+  .sidebar .sidebar-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border: 1px solid rgba(255,255,255,.16);
+    background: #18243a;
+    color: #fff;
+    font-weight: 850;
+  }
+  .sidebar:not(.mobile-open) { max-height: 116px; overflow: hidden; }
+  .sidebar:not(.mobile-open) > .sidebar-section,
+  .sidebar:not(.mobile-open) > button:not(.sidebar-toggle) { display: none; }
   .metric-grid, .two-col, .ai-grid, .record-summary, .detail-card-grid, .edit-form-grid, .readonly-strip { grid-template-columns: 1fr; }
   .detail-card.wide, .edit-form-grid label.wide { grid-column: span 1; }
   .page-title { display: block; }
