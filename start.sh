@@ -52,7 +52,8 @@ elif [ -n "${DEFAULT_EMAIL:-}" ] && [ -n "${DEFAULT_PASSWORD:-}" ]; then
   demo_credentials_password="$DEFAULT_PASSWORD"
 fi
 demo_credentials_bind_host="${FRONTEND_HOST:-127.0.0.1}"
-if [ "${NODE_ENV:-development}" != production ] && [ "${ENABLE_DEMO_CREDENTIAL_AUTOFILL:-true}" = true ] && [ "$demo_credentials_bind_host" != "0.0.0.0" ] && [ -n "$demo_credentials_email" ] && [ -n "$demo_credentials_password" ]; then
+demo_credentials_lan_allowed="${ALLOW_LAN_DEMO_CREDENTIAL_AUTOFILL:-false}"
+if [ "${NODE_ENV:-development}" != production ] && [ "${ENABLE_DEMO_CREDENTIAL_AUTOFILL:-true}" = true ] && { [ "$demo_credentials_bind_host" != "0.0.0.0" ] || [ "$demo_credentials_lan_allowed" = true ]; } && [ -n "$demo_credentials_email" ] && [ -n "$demo_credentials_password" ]; then
   export NEXT_PUBLIC_ENABLE_DEMO_CREDENTIAL_AUTOFILL=true
   export NEXT_PUBLIC_DEMO_EMAIL="$demo_credentials_email"
   export NEXT_PUBLIC_DEMO_PASSWORD="$demo_credentials_password"
@@ -77,7 +78,7 @@ else
   unset VITE_DEMO_EMAIL VITE_DEMO_PASSWORD VITE_DEMO_TENANT
   unset REACT_APP_DEMO_EMAIL REACT_APP_DEMO_PASSWORD REACT_APP_DEMO_TENANT
 fi
-unset demo_credentials_email demo_credentials_password demo_credentials_tenant demo_credentials_bind_host demo_credentials_project_dir demo_credentials_line demo_credentials_key demo_credentials_value demo_credentials_first demo_credentials_last
+unset demo_credentials_email demo_credentials_password demo_credentials_tenant demo_credentials_bind_host demo_credentials_lan_allowed demo_credentials_project_dir demo_credentials_line demo_credentials_key demo_credentials_value demo_credentials_first demo_credentials_last
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 set -a
