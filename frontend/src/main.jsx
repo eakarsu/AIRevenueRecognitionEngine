@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
+import DecisionCenter from './DecisionCenter'
 
 const API_BASE = '/api'
 
@@ -1408,11 +1409,13 @@ function App() {
         <div className="sidebar-section">AI Modules</div>
         {featureModules.filter(r => r.aiEnabled).map(r => <button className={view === r.key ? 'active' : ''} onClick={() => setView(r.key)} key={r.key}>{r.label}</button>)}
         <div className="sidebar-section">Analysis</div>
+        <button className={view === 'decision-center' ? 'active' : ''} onClick={() => setView('decision-center')}>Decision Center</button>
         <button className={view === 'reports' ? 'active' : ''} onClick={() => setView('reports')}>Reports</button>
         <button className={view === 'ai' ? 'active' : ''} onClick={() => setView('ai')}>AI Workbench</button>
         <button className="logout" onClick={() => { localStorage.removeItem('revrec_token'); localStorage.removeItem('revrec_user'); setUser(null) }}>Logout</button>
       </aside>
       {view === 'dashboard' && <Dashboard setView={setView} />}
+      {view === 'decision-center' && <DecisionCenter />}
       {currentResource && <DataPage resource={currentResource} />}
       {currentAIModule && <AIModuleWorkspace module={currentAIModule} />}
       {view === 'reports' && <ReportsPage />}
