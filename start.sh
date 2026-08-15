@@ -51,7 +51,8 @@ elif [ -n "${DEFAULT_EMAIL:-}" ] && [ -n "${DEFAULT_PASSWORD:-}" ]; then
   demo_credentials_email="$DEFAULT_EMAIL"
   demo_credentials_password="$DEFAULT_PASSWORD"
 fi
-if [ "${NODE_ENV:-development}" != production ] && [ "${ENABLE_DEMO_CREDENTIAL_AUTOFILL:-true}" = true ] && [ -n "$demo_credentials_email" ] && [ -n "$demo_credentials_password" ]; then
+demo_credentials_bind_host="${FRONTEND_HOST:-127.0.0.1}"
+if [ "${NODE_ENV:-development}" != production ] && [ "${ENABLE_DEMO_CREDENTIAL_AUTOFILL:-true}" = true ] && [ "$demo_credentials_bind_host" != "0.0.0.0" ] && [ -n "$demo_credentials_email" ] && [ -n "$demo_credentials_password" ]; then
   export NEXT_PUBLIC_ENABLE_DEMO_CREDENTIAL_AUTOFILL=true
   export NEXT_PUBLIC_DEMO_EMAIL="$demo_credentials_email"
   export NEXT_PUBLIC_DEMO_PASSWORD="$demo_credentials_password"
@@ -76,7 +77,7 @@ else
   unset VITE_DEMO_EMAIL VITE_DEMO_PASSWORD VITE_DEMO_TENANT
   unset REACT_APP_DEMO_EMAIL REACT_APP_DEMO_PASSWORD REACT_APP_DEMO_TENANT
 fi
-unset demo_credentials_email demo_credentials_password demo_credentials_tenant demo_credentials_project_dir demo_credentials_line demo_credentials_key demo_credentials_value demo_credentials_first demo_credentials_last
+unset demo_credentials_email demo_credentials_password demo_credentials_tenant demo_credentials_bind_host demo_credentials_project_dir demo_credentials_line demo_credentials_key demo_credentials_value demo_credentials_first demo_credentials_last
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 set -a
@@ -85,6 +86,9 @@ set +a
 BACKEND_PORT="${BACKEND_PORT:-${PORT:-3001}}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 export ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-http://127.0.0.1:$FRONTEND_PORT,http://localhost:$FRONTEND_PORT}"
+if [[ -n "${FRONTEND_PUBLIC_ORIGIN:-}" && ",$ALLOWED_ORIGINS," != *",$FRONTEND_PUBLIC_ORIGIN,"* ]]; then
+  export ALLOWED_ORIGINS="$ALLOWED_ORIGINS,$FRONTEND_PUBLIC_ORIGIN"
+fi
 
 for directory in "$PROJECT_DIR/backend/node_modules" "$PROJECT_DIR/frontend/node_modules"; do
   [[ -d "$directory" ]] || { echo "Missing dependencies. Run ./scripts/bootstrap.sh explicitly." >&2; exit 1; }
@@ -111,7 +115,7 @@ trap cleanup EXIT INT TERM
 
 (cd "$PROJECT_DIR/backend" && PORT="$BACKEND_PORT" npm start) &
 backend_pid=$!
-(cd "$PROJECT_DIR/frontend" && BROWSER=none PORT="$FRONTEND_PORT" npm start -- --host 127.0.0.1 --port "$FRONTEND_PORT" --strictPort) &
+(cd "$PROJECT_DIR/frontend" && BROWSER=none PORT="$FRONTEND_PORT" npm start -- --host "${FRONTEND_HOST:-127.0.0.1}" --port "$FRONTEND_PORT" --strictPort) &
 frontend_pid=$!
 
 echo "Governed revenue API: http://localhost:$BACKEND_PORT"
