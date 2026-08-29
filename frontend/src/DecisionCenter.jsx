@@ -5,6 +5,12 @@ const profile = {
   "outcome": "Revenue exposure reviewed",
   "unit": "$K/period"
 };
+const commercialScenario = {
+  summary: 'Size a contract-to-ledger pilot and stage CRM, billing, usage, ERP, and close evidence.',
+  defaults: { contracts: 3200, annualValue: 78000, exceptionRate: 6.5, improvementRate: 58 },
+  milestones: ['Connect CRM, contract repository, and billing for one product line', 'Reproduce obligation allocation and amendment deltas', 'Export approved journals to a sandbox general ledger', 'Measure close-time, exception, and audit-rework improvement'],
+  connectors: ['Salesforce / contract repository', 'Stripe / usage and billing', 'NetSuite / SAP / Oracle general ledger'],
+};
 const seedItems = [
   {
     "id": "rev-101",
@@ -107,6 +113,7 @@ export default function CodexOperationsFeature() {
   const [errors, setErrors] = useState({});
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState({ task: '', owner: '', priority: 'Medium', due: '', source: '', impact: 5 });
+  const [commercialInputs, setCommercialInputs] = useState(commercialScenario.defaults);
 
   const items = workspace.items;
   const today = new Date().toISOString().slice(0, 10);
@@ -156,6 +163,11 @@ export default function CodexOperationsFeature() {
     const impact = Math.round(items.reduce((sum, item) => sum + Number(item.impact || 0), 0) * confidence / 100);
     return { open, urgent, overdue, evidence, pending, impact };
   }, [confidence, items]);
+  const commercial = useMemo(() => {
+    const baseline = Number(commercialInputs.contracts) * Number(commercialInputs.annualValue);
+    const opportunity = baseline * Number(commercialInputs.exceptionRate) / 100;
+    return { baseline, opportunity, captured: opportunity * Number(commercialInputs.improvementRate) / 100 };
+  }, [commercialInputs]);
 
   const alerts = useMemo(
     () => items.filter((item) => isOverdue(item) || item.escalated || (item.priority === 'Critical' && item.status !== 'Done')),
@@ -288,6 +300,19 @@ export default function CodexOperationsFeature() {
           </article>
         ))}
       </div>
+
+      <section style={{ padding: 18, border: '1px solid #cbd5e1', borderRadius: 14, background: '#fff', marginBottom: 16 }}>
+        <p style={{ margin: 0, color: '#0f766e', fontSize: 11, fontWeight: 850, textTransform: 'uppercase', letterSpacing: '.12em' }}>Commercial extension</p>
+        <h2 style={{ margin: '7px 0' }}>Revenue Close Value & Connector Lab</h2>
+        <p style={{ color: '#64748b' }}>{commercialScenario.summary}</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 10 }}>
+          {[['Contracts', 'contracts', 'number'], ['Average annual contract value', 'annualValue', 'currency'], ['Exception / rework rate', 'exceptionRate', 'percent'], ['Expected improvement', 'improvementRate', 'percent']].map(([label,key,type]) => <label key={key} style={{ display: 'grid', gap: 6, fontSize: 12, fontWeight: 800 }}>{label}<div style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="number" min="0" step="any" value={commercialInputs[key]} onChange={event => setCommercialInputs(current => ({ ...current, [key]: event.target.value }))} style={fieldStyle}/>{type === 'percent' && <b>%</b>}</div></label>)}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 10, margin: '15px 0' }}>
+          {[['Annual contract value',commercial.baseline],['Exception exposure',commercial.opportunity],['Expected controlled value',commercial.captured],['Monthly controlled value',commercial.captured/12]].map(([label,value]) => <article key={label} style={{ padding: 13, borderRadius: 10, background: '#f8fafc' }}><small style={{ color: '#64748b' }}>{label}</small><strong style={{ display: 'block', fontSize: 21, marginTop: 5 }}>${Math.round(value).toLocaleString()}</strong></article>)}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(260px,1fr))', gap: 14 }}><div><strong>Measured rollout</strong>{commercialScenario.milestones.map((item,index) => <p key={item} style={{ margin:'9px 0',color:'#475569' }}><b style={{ color:'#0f766e' }}>{index+1}.</b> {item}</p>)}</div><div><strong>Authoritative connectors</strong>{commercialScenario.connectors.map((item,index) => <div key={item} style={{ marginTop:9,padding:10,border:'1px solid #e2e8f0',borderRadius:9 }}><small style={{ color:index?'#b45309':'#047857',fontWeight:850 }}>{index?'PLANNED':'PILOT'}</small><div>{item}</div></div>)}</div></div>
+      </section>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 2fr) minmax(220px, 1fr)', gap: 14, marginBottom: 16 }}>
         <div style={{ padding: 16, border: '1px solid #dbe3ef', borderRadius: 12, background: '#f8fafc' }}>
