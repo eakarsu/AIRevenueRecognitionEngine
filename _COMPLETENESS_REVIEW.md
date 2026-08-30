@@ -57,3 +57,7 @@ Treat this as a prototype: prove one narrow financial outcome end to end with re
 5. **Operational controls:** Removed fallback authentication and public registration, required tenant membership and strong secrets, unmounted legacy generated AI/gap routes, added a transaction-wrapped additive migration, CI checks, explicit bootstrap/migration/development-fixture commands, and a launcher that never installs, seeds, creates databases, or terminates unrelated processes.
 
 The code-level review items are implemented and locally verified. Production completeness still requires an independent accounting owner to approve policy versions and golden schedules, controlled migration/restore rehearsal, real provider contract tests, security/access review, and end-to-end ERP/general-ledger validation; those external approvals and systems were not available during this implementation.
+
+## Extension (2026-08-30)
+
+Added role-gated month-end readiness at `POST /api/governed-revenue/period-close/readiness`. It explains unreconciled syncs, pending journals/outbox items, ledger mismatches and missing golden replays, and never locks a period automatically. Live ERP/GL tests and accountant-approved cases remain open.
