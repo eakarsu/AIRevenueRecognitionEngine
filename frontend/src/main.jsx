@@ -696,7 +696,7 @@ function Login({ onLogin }) {
         >
           Auto Fill Demo Credentials
         </button>
-        <button disabled={loading}>{loading ? 'Signing in...' : 'Sign in'}</button>
+        <button disabled={loading}>{loading ? 'Signing in...' : 'Sign In'}</button>
       </form>
     </div>
   )
