@@ -60,13 +60,6 @@ async function ensureTables() {
       ADD COLUMN IF NOT EXISTS external_status JSONB
   `);
   await pool.query(`
-    DELETE FROM feature_module_records a
-    USING feature_module_records b
-    WHERE a.ctid < b.ctid
-      AND a.module_key = b.module_key
-      AND a.reference = b.reference
-  `);
-  await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS feature_module_records_module_reference_idx
       ON feature_module_records (module_key, reference)
   `);

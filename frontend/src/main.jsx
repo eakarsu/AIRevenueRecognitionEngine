@@ -1,3 +1,6 @@
+import NativeAIControls from './components/NativeAIControls';
+import NativeAIReport from './components/NativeAIReport';
+import useNativeAIRequest from './components/useNativeAIRequest';
 import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
@@ -250,10 +253,17 @@ const aiModuleInputSchemas = {
 }
 
 function initialModuleInputs(moduleKey) {
-  return Object.fromEntries((aiModuleInputSchemas[moduleKey] || []).map(([key, _label, placeholder]) => [key, placeholder]))
+  return Object.fromEntries((aiModuleInputSchemas[moduleKey] || []).map(([key]) => [key, '']))
 }
 
-function toolFormFromPayload(payload) {
+function nativeExamplePayload(value,index,key='') {
+   if(Array.isArray(value))return value.map(item=>nativeExamplePayload(item,index,key));
+   if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([field,item])=>[field,nativeExamplePayload(item,index,field)]));
+   if(typeof value==='number'&&!/id|period|year|month|count|rating|status/i.test(key))return Math.round(value*[1,1.25,1.5][index]*100)/100;
+   if(typeof value==='string'&&/title|name|terms|history|event|market_data|polic/i.test(key))return value+' — illustrative '+['initial review','planning review','detailed review'][index];
+   return value;
+ }
+ function toolFormFromPayload(payload) {
   return Object.fromEntries(Object.entries(payload).map(([key, value]) => [
     key,
     typeof value === 'string' || typeof value === 'number' ? String(value) : JSON.stringify(value, null, 2),
@@ -432,36 +442,7 @@ function defaultNewRecord(resource) {
   return defaults[resource.key] || {}
 }
 
-function AIReport({ data }) {
-  if (!data) return null
-  const content = normalizeAIContent(data)
-  if (typeof content === 'string') return <div className="ai-report"><p>{content}</p></div>
-  const entries = Object.entries(content || {})
-  return (
-    <div className="ai-report">
-      <div className="ai-heading">
-        <span>AI Analysis Report</span>
-        {data.raw_response && <small>OpenRouter response parsed into report sections</small>}
-      </div>
-      <div className="ai-grid">
-        {entries.map(([key, value]) => (
-          <section key={key}>
-            <h4>{titleize(key)}</h4>
-            {Array.isArray(value) ? (
-              <div className="list-stack">
-                {value.map((item, index) => <div className="mini-card" key={index}><AIValue value={item} /></div>)}
-              </div>
-            ) : typeof value === 'object' && value !== null ? (
-              <AIValue value={value} />
-            ) : (
-              <p>{formatValue(value)}</p>
-            )}
-          </section>
-        ))}
-      </div>
-    </div>
-  )
-}
+function AIReport({data}){return <NativeAIReport response={data} title="Revenue analysis report"/>;}
 
 function AIValue({ value }) {
   const normalized = normalizeAIValue(value)
@@ -587,6 +568,8 @@ const chatPromptGroups = [
 ]
 
 function SystemChat({ onNavigate }) {
+  const nativeAIRequest=useNativeAIRequest();
+
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -602,7 +585,7 @@ function SystemChat({ onNavigate }) {
     setBusy(true)
     setMessages(current => [...current, { role: 'user', content: text }])
     try {
-      const result = await request('/system-chat/message', { method: 'POST', body: JSON.stringify({ message: text }) })
+      const result = await nativeAIRequest.run(signal=>request('/system-chat/message', {...({ method: 'POST', body: JSON.stringify({ message: text }) }),signal}))
       if (result.view) onNavigate(result.view)
       setMessages(current => [...current, { role: 'assistant', content: result.reply, action: result.action, data: result.data }])
     } catch (err) {
@@ -618,14 +601,14 @@ function SystemChat({ onNavigate }) {
         <div className="chat-panel">
           <div className="chat-head">
             <div><strong>System Chat</strong><span>Controls pages, APIs, records, and AI tools</span></div>
-            <button onClick={() => setOpen(false)}>Close</button>
+            <button onClick={()=>{nativeAIRequest.cancel();setBusy(false);setOpen(false);}}>Cancel</button>
           </div>
           <div className="chat-prompts">
             {chatPromptGroups.map(group => (
               <section key={group.label}>
                 <span>{group.label}</span>
                 <div>
-                  {group.prompts.map(prompt => <button key={prompt} onClick={() => send(prompt)} disabled={busy}>{prompt}</button>)}
+                  {group.prompts.map(prompt => <button key={prompt} onClick={() => setInput(prompt)} disabled={busy}>{prompt}</button>)}
                 </div>
               </section>
             ))}
@@ -661,13 +644,15 @@ function Login({ onLogin }) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const demoConfigured = Boolean(import.meta.env.VITE_DEMO_EMAIL && import.meta.env.VITE_DEMO_PASSWORD)
 
   async function submit(e) {
     e.preventDefault()
     setLoading(true)
     setError('')
     try {
-      const data = await request('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
+      const tenantId = import.meta.env.VITE_DEMO_TENANT
+      const data = await request('/auth/login', { method: 'POST', body: JSON.stringify({ email, password, ...(tenantId ? { tenantId } : {}) }) })
       localStorage.setItem('revrec_token', data.token)
       localStorage.setItem('revrec_user', JSON.stringify(data.user))
       onLogin(data.user)
@@ -690,12 +675,13 @@ function Login({ onLogin }) {
         <button
           type="button"
           className="demo-credentials-button"
-          onClick={() => { setEmail(import.meta.env.VITE_DEMO_EMAIL || ''); setPassword(import.meta.env.VITE_DEMO_PASSWORD || ''); }}
-          disabled={!import.meta.env.VITE_DEMO_EMAIL || !import.meta.env.VITE_DEMO_PASSWORD}
-          aria-label="Auto Fill Demo Credentials"
+          onClick={() => { setEmail(import.meta.env.VITE_DEMO_EMAIL); setPassword(import.meta.env.VITE_DEMO_PASSWORD); }}
+          disabled={!demoConfigured || loading}
+          aria-label="Fill demo credentials"
         >
-          Auto Fill Demo Credentials
+          Fill Demo Credentials
         </button>
+        {!demoConfigured && <small>Demo credentials are not configured for this session.</small>}
         <button disabled={loading}>{loading ? 'Signing in...' : 'Sign In'}</button>
       </form>
     </div>
@@ -896,13 +882,26 @@ function ReportsPage() {
 }
 
 function AIToolsPage() {
+  const nativeAIRequest=useNativeAIRequest();
+
   const [active, setActive] = useState(aiTools[0])
   const [form, setForm] = useState(() => toolFormFromPayload(aiTools[0].payload))
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [history, setHistory] = useState([])
+  const [historyError, setHistoryError] = useState('')
+  const [savedRun, setSavedRun] = useState(null)
 
+  function loadHistory() {
+    request('/ai/history').then(data => { setHistory(normalizeRows(data)); setHistoryError('') }).catch(err => setHistoryError(err.message))
+  }
+  useEffect(loadHistory, [])
+
+
+  const presets=[0,1,2].map(index=>({name:['Quick brief','Team planning','Detailed review'][index],fill:()=>{setForm(toolFormFromPayload(nativeExamplePayload(active.payload,index)));return {filled:Object.keys(active.payload).length,manual:[]};}}));
   function chooseTool(tool) {
+    nativeAIRequest.cancel();setLoading(false);
     setActive(tool)
     setForm(toolFormFromPayload(tool.payload))
     setResult(null)
@@ -914,8 +913,9 @@ function AIToolsPage() {
     setError('')
     setResult(null)
     try {
-      const data = await request(tool.endpoint, { method: 'POST', body: JSON.stringify(payloadFromToolForm(tool, form)) })
+      const data = await nativeAIRequest.run(signal=>request(tool.endpoint, {...({ method: 'POST', body: JSON.stringify(payloadFromToolForm(tool, form)) }),signal}))
       setResult(data)
+      loadHistory()
     } catch (err) {
       setError(err.message)
     } finally {
@@ -929,9 +929,9 @@ function AIToolsPage() {
       <div className="tool-grid">
         {aiTools.map(tool => <button className={active.key === tool.key ? 'tool active' : 'tool'} key={tool.key} onClick={() => chooseTool(tool)}>{tool.label}</button>)}
       </div>
-      <section className="ai-input-panel">
+      <NativeAIControls presets={presets} busy={loading} onCancel={()=>{nativeAIRequest.cancel();setLoading(false);}} context={active.label}><section className="ai-input-panel">
         <div className="ai-form-heading">
-          <div><span>Analysis inputs</span><small>Review and edit the seeded example before running the model.</small></div>
+          <div><span>Analysis inputs</span><small>Review every illustrative example and actual source before generating.</small></div>
           <span className="ai-badge">{active.label}</span>
         </div>
         <div className="ai-input-grid">
@@ -949,14 +949,26 @@ function AIToolsPage() {
             )
           })}
         </div>
-      </section>
+      </section></NativeAIControls>
       {error && <div className="error">{error}</div>}
       {result && <AIReport data={result} />}
+      <section className="ai-history">
+        <div className="ai-form-heading"><div><span>Saved AI runs</span><small>Select a run to read its stored analysis.</small></div><button type="button" onClick={loadHistory}>Refresh</button></div>
+        {historyError && <div className="error">{historyError}</div>}
+        {!historyError && history.length === 0 && <p>No saved AI runs are available.</p>}
+        {history.map(run => <button className="ai-history-row" type="button" key={run.id} onClick={async () => {
+          try { setSavedRun(await request(`/ai/history/${encodeURIComponent(run.id)}`)); setHistoryError('') }
+          catch (err) { setHistoryError(err.message) }
+        }}><strong>{titleize(run.endpoint?.split('/').filter(Boolean).pop() || 'AI run')}</strong><span>{new Date(run.created_at).toLocaleString()}</span></button>)}
+        {savedRun && <div><button type="button" onClick={() => setSavedRun(null)}>Close saved report</button><AIReport data={{ analysis: savedRun.result }} /></div>}
+      </section>
     </main>
   )
 }
 
 function AIModuleWorkspace({ module }) {
+  const nativeAIRequest=useNativeAIRequest();
+
   const schema = aiModuleInputSchemas[module.key] || []
   const [records, setRecords] = useState([])
   const [recordId, setRecordId] = useState('')
@@ -966,7 +978,13 @@ function AIModuleWorkspace({ module }) {
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
 
+  const presets=[0,1,2].map(index=>({name:['Quick brief','Team planning','Detailed review'][index],fill:()=>{
+    const referenceFields=schema.filter(([key])=>/reference|(?:^|_)id$/i.test(key))
+    setInputs(current=>Object.fromEntries(schema.map(([key,label,placeholder])=>[key,referenceFields.some(([referenceKey])=>referenceKey===key)?current[key]||'':'Illustrative '+label.toLowerCase()+': '+placeholder+'. '+['Identify missing evidence.','Compare options and assign reviewers.','Explain tradeoffs, uncertainties and next steps.'][index]])))
+    return {filled:schema.length-referenceFields.length,manual:[...(!recordId?['Choose an actual governed workflow record']:[]),...referenceFields.filter(([key])=>!inputs[key]).map(([,label])=>label)]}
+  }}));
   useEffect(() => {
+    nativeAIRequest.cancel();setRunning(false);
     setLoading(true)
     setError('')
     setResult(null)
@@ -988,10 +1006,10 @@ function AIModuleWorkspace({ module }) {
     setError('')
     setResult(null)
     try {
-      const data = await request(`/feature-modules/${module.moduleKey}/${recordId}/run`, {
+      const data = await nativeAIRequest.run(signal=>request(`/feature-modules/${module.moduleKey}/${recordId}/run`, {...({
         method: 'POST',
         body: JSON.stringify({ inputs }),
-      })
+      }),signal}))
       setResult(data.analysis || data)
     } catch (err) {
       setError(err.message)
@@ -1005,7 +1023,7 @@ function AIModuleWorkspace({ module }) {
       <div className="page-title">
         <div><h1>{module.label}</h1><p>Source-specific AI analysis with explicit business inputs and an auditable workflow record.</p></div>
       </div>
-      <form className="ai-input-panel" onSubmit={runAnalysis}>
+      <NativeAIControls presets={presets} busy={running} onCancel={()=>{nativeAIRequest.cancel();setRunning(false);}} context={module.label}><form className="ai-input-panel" onSubmit={runAnalysis}>
         <div className="ai-form-heading">
           <div><span>Analysis request</span><small>The selected record supplies context; these fields define the question the AI must answer.</small></div>
           <span className="ai-badge">AI workflow</span>
@@ -1032,7 +1050,7 @@ function AIModuleWorkspace({ module }) {
           <span>{records.length} governed context records available</span>
           <button type="submit" disabled={loading || running || !recordId}>{running ? 'Analyzing...' : `Run ${module.label}`}</button>
         </div>
-      </form>
+      </form></NativeAIControls>
       {error && <div className="error">{error}</div>}
       {result && <AIReport data={result} />}
     </main>
