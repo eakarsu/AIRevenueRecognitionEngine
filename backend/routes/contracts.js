@@ -6,7 +6,15 @@ try{await pool.query('INSERT INTO audit_trail (user_id,action,table_name,record_
 }
 router.get('/',async(req,res)=>{
 try{const page=Math.max(1,parseInt(req.query.page)||1);const limit=20;const offset=(page-1)*limit;
-const[r,c]=await Promise.all([pool.query(`SELECT c.*,cu.name as customer_name FROM contracts c LEFT JOIN customers cu ON c.customer_id=cu.id ORDER BY c.created_at DESC LIMIT $1 OFFSET $2`,[limit,offset]),pool.query('SELECT COUNT(*) FROM contracts')]);
+// Optional search/filter on the contracts list; unchanged without params.
+const params=[];const clauses=[];
+const search=typeof req.query.search==='string'?req.query.search.trim():'';
+if(search){params.push(`%${search}%`);clauses.push(`(c.contract_number ILIKE $1 OR c.title ILIKE $1 OR c.description ILIKE $1)`);}
+const statusFilter=typeof req.query.status==='string'?req.query.status.trim():'';
+if(statusFilter){params.push(statusFilter);clauses.push(`c.status = $${params.length}`);}
+const where=clauses.length?` WHERE ${clauses.join(' AND ')}`:'';
+const listParams=[...params,limit,offset];
+const[r,c]=await Promise.all([pool.query(`SELECT c.*,cu.name as customer_name FROM contracts c LEFT JOIN customers cu ON c.customer_id=cu.id${where} ORDER BY c.created_at DESC LIMIT $${params.length+1} OFFSET $${params.length+2}`,listParams),pool.query(`SELECT COUNT(*) FROM contracts c${where}`,params)]);
 const total=parseInt(c.rows[0].count);res.json({data:r.rows,pagination:{page,limit,total,totalPages:Math.ceil(total/limit)}});
 }catch(e){console.error(e);res.status(500).json({error:'Internal server error'});}
 });

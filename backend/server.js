@@ -52,6 +52,7 @@ app.use('/api/exports', require('./routes/exports'));
 app.use('/api/integrations', require('./routes/integrations'));
 app.use('/api/custom-views', require('./routes/customViews'));
 app.use('/api/ops', require('./routes/ops'));
+app.use('/api', require('./routes/featurePack'));
 
 // Governed revenue endpoints remain separate from the legacy operational views.
 app.use('/api/governed-revenue', require('./routes/governedRevenue')(authenticate));
